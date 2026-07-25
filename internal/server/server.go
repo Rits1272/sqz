@@ -25,6 +25,7 @@ import (
 
 	"github.com/Rits1272/sqz/internal/links"
 	"github.com/Rits1272/sqz/internal/nip98"
+	"github.com/Rits1272/sqz/internal/relays"
 	"github.com/Rits1272/sqz/internal/store"
 )
 
@@ -74,10 +75,11 @@ type FirebaseConfig struct {
 func (f FirebaseConfig) Enabled() bool { return f.APIKey != "" }
 
 type Server struct {
-	cfg   Config
-	store *store.Store
-	log   *slog.Logger
-	web   fs.FS
+	cfg       Config
+	store     *store.Store
+	log       *slog.Logger
+	web       fs.FS
+	publisher *relays.Publisher
 }
 
 func New(cfg Config, st *store.Store, log *slog.Logger) *Server {
@@ -88,6 +90,13 @@ func New(cfg Config, st *store.Store, log *slog.Logger) *Server {
 // without the frontend.
 func (s *Server) WithWeb(web fs.FS) *Server {
 	s.web = web
+	return s
+}
+
+// WithPublisher attaches the relay publisher. Optional — nil means events are
+// indexed but not published, which is what tests want.
+func (s *Server) WithPublisher(p *relays.Publisher) *Server {
+	s.publisher = p
 	return s
 }
 
@@ -329,6 +338,13 @@ func (s *Server) createLink(w http.ResponseWriter, r *http.Request, requireIssue
 	// otherwise the event's `public` tag decides, so re-publishing toggles it.
 	if err := s.store.SetPublic(r.Context(), link.Slug, link.Public && !link.Revoked); err != nil {
 		s.log.Warn("set public", "slug", link.Slug, "err", err) // non-fatal
+	}
+
+	// Publish the signed event to relays so the link lives somewhere sqz does
+	// not own. Best-effort and off the response path — a down relay must never
+	// fail a create. Revocations publish too, so they propagate the same way.
+	if s.publisher != nil {
+		s.publisher.Publish(*req.Event, req.Relays)
 	}
 
 	s.log.Info("link indexed", "coordinate", link.Coordinate(), "revoked", link.Revoked)
