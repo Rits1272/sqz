@@ -124,7 +124,7 @@ sequenceDiagram
     W->>N: POST /api/links<br/>X-Nostr-Authorization: Nostr <NIP-98>
     N-->>W: 402 Payment Required<br/>WWW-Authenticate: L402 macaroon="…" invoice="lnbc…"
 
-    Note over W,U: WebLN pays inline; QR + manual<br/>preimage entry is the fallback
+    Note over W,U: WebLN pays inline — QR + manual<br/>preimage entry is the fallback
     W->>U: pay 10 sats
     U-->>W: preimage
 
@@ -140,7 +140,7 @@ sequenceDiagram
     S-->>W: 200 { short_url }
 
     W->>L: publish the signed event
-    Note over L: relays are the durable home;<br/>Redis is only a cache of this
+    Note over L: relays are the durable home —<br/>Redis is only a cache of this
 ```
 
 ### The header collision, and why there are two of them
