@@ -1,9 +1,8 @@
-# Deploys sqz on every push to main, via a self-hosted runner on the
-# production VPS (needs the host Docker daemon and /opt/sqz).
+# Deploys sqz on every push to main. Runs on a GitHub-hosted runner that SSHes
+# into the VPS and runs the deploy there (build, recreate, reload, health check).
 #
-# One-time host setup: /opt/sqz is a git checkout of this repo with a valid
-# .env beside it, and a self-hosted runner labelled `sqz-deploy` runs as a
-# service with Docker access.
+# Host prerequisites: /opt/sqz is a git checkout with a valid .env; the
+# SQZ_SSH_* secrets authorize a key that can run Docker on the box.
 
 name: Deploy
 
@@ -18,29 +17,31 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, sqz-deploy]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Update /opt/sqz to this commit
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.SQZ_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SQZ_SSH_HOST }}
+          SSH_USER: ${{ secrets.SQZ_SSH_USER }}
         run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -i ~/.ssh/deploy_key "$SSH_USER@$SSH_HOST" 'bash -s' <<'DEPLOY'
           set -euo pipefail
           cd /opt/sqz
           git fetch --prune origin
-          # .env is gitignored, so reset refreshes code without touching secrets.
-          git reset --hard "${GITHUB_SHA}"
+          git reset --hard origin/main
           echo "deploying $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)"
 
-      - name: Build and recreate services
-        run: |
-          set -euo pipefail
-          cd /opt/sqz
           docker compose build sqzd
           docker compose up -d
 
-      - name: Validate and reload nginx
-        run: |
-          set -euo pipefail
-          cd /opt/sqz
           # Test before reload so a broken config can't take the site down.
           if docker compose exec -T nginx nginx -t; then
             docker compose exec -T nginx nginx -s reload
@@ -49,16 +50,15 @@ jobs:
             exit 1
           fi
 
-      - name: Health check
-        run: |
-          set -euo pipefail
-          cd /opt/sqz
+          # Health check on the host port from .env (defaults to 8000).
+          PORT=$(grep -E '^SQZ_PORT=' .env | cut -d= -f2); PORT=${PORT:-8000}
           for i in $(seq 1 10); do
-            if curl -fsS -o /dev/null "http://localhost:${SQZ_PORT:-8000}/health"; then
-              echo "healthy"; exit 0
+            if curl -fsS -o /dev/null "http://localhost:${PORT}/health"; then
+              echo "healthy on :${PORT}"; exit 0
             fi
             echo "waiting for sqzd health ($i/10)"; sleep 3
           done
           echo "::error::sqzd did not report healthy after deploy"
           docker compose logs --tail=50 sqzd nginx
           exit 1
+          DEPLOY
