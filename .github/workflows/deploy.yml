@@ -42,13 +42,15 @@ jobs:
           docker compose build sqzd
           docker compose up -d
 
-          # Test before reload so a broken config can't take the site down.
-          if docker compose exec -T nginx nginx -t; then
-            docker compose exec -T nginx nginx -s reload
-          else
-            echo "::error::nginx config invalid — not reloading"
+          # nginx.conf is a single-file bind mount. `git reset` replaces it with
+          # a new inode, but the running container still holds the old one, so an
+          # in-place `nginx -s reload` reads stale config. Validate the NEW file
+          # in a throwaway container, then force-recreate so the mount re-resolves.
+          if ! docker compose run --rm --no-deps -T nginx nginx -t; then
+            echo "::error::nginx config invalid — not recreating"
             exit 1
           fi
+          docker compose up -d --force-recreate nginx
 
           # Health check on the host port from .env (defaults to 8000).
           PORT=$(grep -E '^SQZ_PORT=' .env | cut -d= -f2); PORT=${PORT:-8000}
