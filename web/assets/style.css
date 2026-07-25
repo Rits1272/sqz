@@ -40,8 +40,19 @@
   --ease:   cubic-bezier(.22,.68,.36,1);
   --spring: cubic-bezier(.34,1.46,.44,1);
 
+  /* Interface response times. Anything the user did themselves resolves in
+     --fast: below ~140ms a transition reads as the control obeying, above it as
+     the control deciding. --mid is for things the page does on its own. */
+  --fast: .13s;
+  --mid:  .22s;
+
   --shadow:    0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
   --shadow-lg: 0 2px 4px rgba(0,0,0,.32), 0 24px 60px -24px rgba(0,0,0,.72);
+
+  /* Graph paper: two weights, plus the colour it takes under the pointer. */
+  --grid-line: rgba(255,255,255,.038);
+  --grid-rule: rgba(255,255,255,.055);
+  --grid-hot:  rgba(139,107,255,.30);
 }
 
 @media (prefers-color-scheme: light) {
@@ -65,6 +76,10 @@
 
     --shadow:    0 1px 2px rgba(12,12,26,.06), 0 8px 24px -14px rgba(12,12,26,.18);
     --shadow-lg: 0 2px 4px rgba(12,12,26,.06), 0 24px 60px -28px rgba(12,12,26,.24);
+
+    --grid-line: rgba(12,12,26,.045);
+    --grid-rule: rgba(12,12,26,.07);
+    --grid-hot:  rgba(106,69,240,.26);
   }
 }
 
@@ -82,6 +97,57 @@ body {
   -webkit-font-smoothing: antialiased;
   letter-spacing: -0.006em;
   overflow-x: hidden;
+}
+
+/* ------------------------------------------------------------------ grid */
+
+/* Graph paper behind everything. Two rulings — a fine 32px cell and a heavier
+   line every fourth — so the page has a measurable surface rather than a flat
+   void.
+ *
+ * The two layers are pseudo-elements rather than one masked box, because a
+ * mask on .grid would also apply to what's inside it: the pointer light would
+ * be dimmed twice, hardest exactly where the content (and the cursor) lives. */
+.grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* The paper itself, fading toward the edges. A grid that runs to the viewport
+   border reads as wallpaper; one that dissolves reads as depth. */
+.grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right,  var(--grid-rule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-rule) 1px, transparent 1px),
+    linear-gradient(to right,  var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 128px 128px, 128px 128px, 32px 32px, 32px 32px;
+  background-position: center top;
+  -webkit-mask-image: radial-gradient(125% 105% at 50% 0%, #000 0%, rgba(0,0,0,.62) 55%, transparent 92%);
+          mask-image: radial-gradient(125% 105% at 50% 0%, #000 0%, rgba(0,0,0,.62) 55%, transparent 92%);
+}
+
+/* The pointer carries a small light with it, and the paper answers. Position
+   comes from --mx/--my, which app.js writes on pointermove; with no pointer
+   (touch, keyboard) --spot-on is never set and this layer stays invisible. */
+.grid::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right,  var(--grid-hot) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-hot) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: center top;
+  opacity: var(--spot-on, 0);
+  transition: opacity .5s var(--ease);
+  -webkit-mask-image: radial-gradient(210px 210px at var(--mx, -999px) var(--my, -999px), #000 0%, rgba(0,0,0,.5) 34%, rgba(0,0,0,.13) 62%, transparent 82%);
+          mask-image: radial-gradient(210px 210px at var(--mx, -999px) var(--my, -999px), #000 0%, rgba(0,0,0,.5) 34%, rgba(0,0,0,.13) 62%, transparent 82%);
 }
 
 /* One soft light source, behind everything. */
@@ -109,16 +175,17 @@ main {
   padding: 0 22px 96px;
 }
 
-/* Entrance: the page assembles once, top-down. Purposeful, not ambient. */
+/* Entrance: the page assembles once, top-down. Purposeful, not ambient — and
+   quick, because the first thing a landing page proves is that it is fast. */
 [data-enter] {
   opacity: 0;
   transform: translateY(10px);
-  animation: rise .62s var(--ease) forwards;
+  animation: rise .46s var(--ease) forwards;
 }
-[data-enter="1"] { animation-delay: .02s; }
-[data-enter="2"] { animation-delay: .10s; }
-[data-enter="3"] { animation-delay: .18s; }
-[data-enter="4"] { animation-delay: .30s; }
+[data-enter="1"] { animation-delay: .01s; }
+[data-enter="2"] { animation-delay: .06s; }
+[data-enter="3"] { animation-delay: .12s; }
+[data-enter="4"] { animation-delay: .20s; }
 
 @keyframes rise { to { opacity: 1; transform: none; } }
 
@@ -177,7 +244,7 @@ main {
   border: 0; background: none; cursor: pointer;
   font-family: inherit; font-size: 12px; color: var(--ink-3);
   padding: 4px 6px; border-radius: 6px;
-  transition: color .16s var(--ease), background .16s var(--ease);
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
 }
 .account-out:hover { color: var(--ink); background: var(--surface-3); }
 .account-out:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
@@ -235,7 +302,7 @@ input[type="url"], input[type="text"], input[type="password"] {
   border: 1px solid var(--line);
   border-radius: var(--r);
   padding: 13px 14px;
-  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), background var(--fast) var(--ease);
 }
 input::placeholder { color: var(--ink-3); }
 input:focus {
@@ -276,7 +343,7 @@ input:focus {
   border: 1px solid var(--line);
   border-radius: var(--r);
   overflow: hidden;
-  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), background var(--fast) var(--ease);
 }
 .prefixed:focus-within {
   background: var(--surface);
@@ -307,6 +374,7 @@ input:focus {
 
 .btn {
   position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -323,11 +391,12 @@ input:focus {
   cursor: pointer;
   text-decoration: none;
   white-space: nowrap;
-  transition: transform .18s var(--spring), background .18s var(--ease),
-              border-color .18s var(--ease), box-shadow .18s var(--ease), color .18s var(--ease);
+  transition: transform var(--fast) var(--spring), background var(--fast) var(--ease),
+              border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 .btn:hover { background: var(--surface-3); border-color: var(--line-2); }
-.btn:active { transform: scale(.975); }
+/* Press is immediate — a delay here is the one place lag is unmistakable. */
+.btn:active { transform: scale(.975); transition-duration: .04s; }
 .btn:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 .btn[disabled] { cursor: not-allowed; opacity: .62; }
 .btn[disabled]:active { transform: none; }
@@ -353,10 +422,24 @@ input:focus {
               0 18px 38px -12px rgba(139,107,255,.9),
               inset 0 1px 0 rgba(255,255,255,.34);
 }
-.btn-primary:active { transform: translateY(0) scale(.982); }
-.btn-primary:active { transform: scale(.975); }
+.btn-primary:active { transform: translateY(0) scale(.978); }
 
-.btn-face { display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.2; }
+/* The gradient brightens under the cursor. --bx/--by are written by app.js on
+   pointermove; unset, the highlight sits off the control and nothing shows. */
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(120px 120px at var(--bx, -999px) var(--by, -999px),
+                              rgba(255,255,255,.34), transparent 70%);
+  opacity: 0;
+  transition: opacity var(--mid) var(--ease);
+}
+.btn-primary:hover::after { opacity: 1; }
+
+.btn-face { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.2; }
 .btn-line { display: inline-flex; align-items: center; gap: 7px; }
 .btn-label { font-weight: 640; font-size: 15px; }
 
@@ -457,7 +540,7 @@ input:focus {
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: border-color .18s var(--ease), color .18s var(--ease);
+  transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 .result-url a:hover { border-color: var(--violet); color: var(--violet); }
 .result-url a:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
@@ -600,8 +683,8 @@ input:focus {
   font-family: inherit; font-size: 12.5px; color: var(--ink-3);
   padding: 6px 10px; border-radius: var(--r-sm);
   opacity: .7;
-  transition: opacity .18s var(--ease), color .18s var(--ease),
-              background .18s var(--ease), border-color .18s var(--ease);
+  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease),
+              background var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 .row:hover .row-act { opacity: 1; }
 .row-act:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
@@ -764,4 +847,255 @@ input:focus {
   .signin-group { gap: 6px; }
   .signin-group .btn { padding: 10px 12px; font-size: 13px; }
   #signin-import { display: none; }
+}
+
+/* =========================================================== micro-detail
+ *
+ * Everything below is response, not decoration: each rule fires because the
+ * user did something, and each one resolves inside a fifth of a second. The
+ * page must read exactly the same with all of it switched off — which is what
+ * the reduced-motion block at the bottom of this section actually does.
+ */
+
+/* Press ripple. Ink spreading from the point of contact: the cheapest possible
+   proof that the click landed where the user thought it did. Injected by
+   app.js, removed on animationend. */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background: currentColor;
+  opacity: .22;
+  transform: translate(-50%, -50%) scale(0);
+  animation: ripple .52s var(--ease) forwards;
+}
+.btn-primary .ripple { background: #fff; opacity: .3; }
+@keyframes ripple {
+  to { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+}
+
+/* Sign-in options take the identity colour on hover — violet is the key half
+   of the story, and these two buttons are where a key enters the page. */
+.btn-ghost:hover {
+  background: var(--violet-soft);
+  border-color: color-mix(in srgb, var(--violet) 30%, transparent);
+}
+
+/* Copy: the label swaps to a tick and springs, so the receipt is legible from
+   the corner of the eye without a toast stealing focus. */
+.btn-copy .copy-label { display: inline-block; }
+.btn-copy.is-done .copy-label { animation: labelPop .34s var(--spring); }
+.btn-copy.is-done .copy-label::before { content: "✓ "; font-weight: 700; }
+@keyframes labelPop {
+  0%   { transform: scale(.82); opacity: .4; }
+  55%  { transform: scale(1.06); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* The composer lifts a hair while it's being used. */
+.composer { transition: border-color var(--mid) var(--ease), box-shadow var(--mid) var(--ease); }
+.composer:focus-within { border-color: var(--line-2); }
+
+/* A long URL heats the meter. Amber is the money colour, and a bar that starts
+   to glow is the page saying "this one is worth squeezing". */
+.meter-fill { transition: width .42s var(--ease), box-shadow var(--mid) var(--ease); }
+.meter.is-long .meter-fill { box-shadow: 0 0 9px -1px var(--amber); }
+
+/* ------------------------------------------------------- the payoff moment */
+
+.result { position: relative; }
+
+/* One light sweep across the card the instant a link exists. Runs on the
+   card's own background, so nothing has to be clipped and the sparks below
+   stay free to leave the box. */
+.result.is-fresh {
+  background-image: linear-gradient(100deg, transparent 42%,
+                    color-mix(in srgb, var(--violet) 22%, transparent) 50%, transparent 58%);
+  background-size: 260% 100%;
+  background-repeat: no-repeat;
+  animation: resultIn .5s var(--spring) both, sweep .9s var(--ease) .08s 1;
+}
+@keyframes sweep {
+  from { background-position: -80% 0; }
+  to   { background-position: 180% 0; }
+}
+
+/* The ratio lands with a little weight behind it once the count-up settles. */
+.result-ratio { display: inline-block; }
+.result-ratio.is-hit { animation: ratioHit .46s var(--spring); }
+@keyframes ratioHit {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.09); }
+  100% { transform: scale(1); }
+}
+
+/* Sparks. Twelve of them, violet and amber, thrown from the ratio and gone in
+   three quarters of a second — the one unabashedly celebratory thing on the
+   page, spent only on the moment the product actually worked. */
+.sparks { position: absolute; width: 0; height: 0; pointer-events: none; z-index: 2; }
+.spark {
+  position: absolute;
+  width: 5px; height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: var(--c);
+  animation: spark .74s var(--ease) forwards;
+}
+@keyframes spark {
+  0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+  70%  { opacity: .85; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(.2); opacity: 0; }
+}
+
+/* ------------------------------------------------------------ list + steps */
+
+/* Rows show where they go. The arrow is the same gesture as the primary
+   button's, so "this travels somewhere" reads the same everywhere. */
+.row-slug::after {
+  content: "↗";
+  display: inline-block;
+  margin-left: 5px;
+  font-size: 11px;
+  opacity: 0;
+  transform: translate(-3px, 2px);
+  transition: opacity var(--fast) var(--ease), transform var(--fast) var(--spring);
+}
+.row:hover .row-slug::after,
+.row-slug:focus-visible::after { opacity: .65; transform: none; }
+
+/* --------------------------------------------------------- the squeeze */
+
+/* The primary action performs the product. Two jaws sit inside the button's
+   padding and close on the label when you reach for it — the same gesture the
+   brand mark makes on hover, and the same thing sqz does to a URL. The bars
+   are painted inside .btn-sheen, so nothing in the layout moves: on a grid
+   track sized to its content, compressing the real box would shove the field
+   beside it around every time the pointer crossed the button. */
+.btn-sheen::after {
+  content: "";
+  position: absolute;
+  top: 24%; bottom: 24%; left: 0; right: 0;
+  background-image:
+    linear-gradient(currentColor, currentColor),
+    linear-gradient(currentColor, currentColor);
+  background-size: 2px 100%, 2px 100%;
+  background-repeat: no-repeat;
+  background-position: 8px center, right 8px center;
+  opacity: .22;
+  transition: background-position .32s var(--spring), opacity var(--mid) var(--ease);
+}
+.btn-primary:hover .btn-sheen::after {
+  background-position: 15px center, right 15px center;
+  opacity: .5;
+}
+/* Pressed, they close all the way — the squeeze completing. */
+.btn-primary:active .btn-sheen::after {
+  background-position: 18px center, right 18px center;
+  opacity: .64;
+  transition-duration: .09s;
+}
+/* While the link is being signed and published, the jaws hold shut. */
+.btn.is-waiting .btn-sheen::after { opacity: 0; }
+
+/* ------------------------------------------------------------- nav icon */
+
+.nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px; height: 32px;
+  color: var(--ink-3);
+  border-radius: var(--r-sm);
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease),
+              transform var(--fast) var(--spring);
+}
+.nav-icon svg { width: 17px; height: 17px; }
+.nav-icon:hover { color: var(--ink); background: var(--surface-3); transform: translateY(-1px); }
+.nav-icon:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+/* ------------------------------------------------------ payment settled */
+
+/* Ten sats is the largest thing a visitor is asked to do here, and until now
+   the panel simply blinked out of existence. The code gets stamped, the panel
+   is allowed to leave, and only then does the result land — three beats in
+   sequence rather than two collisions in one frame. */
+.qr { position: relative; }
+
+.qr-seal {
+  position: absolute;
+  top: 120px; left: 50%;
+  width: 76px; height: 76px;
+  margin: -38px 0 0 -38px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--success) 92%, #000);
+  box-shadow: 0 10px 30px -8px color-mix(in srgb, var(--success) 65%, transparent);
+  opacity: 0;
+  transform: scale(.55) rotate(-12deg);
+  pointer-events: none;
+  transition: opacity .2s var(--ease), transform .42s var(--spring);
+}
+.qr-seal svg { width: 44px; height: 44px; }
+.qr-seal-ring { stroke: rgba(255,255,255,.42); }
+.qr-seal-tick {
+  stroke: #fff;
+  stroke-dasharray: 34;
+  stroke-dashoffset: 34;
+}
+
+.qr.is-paid .qr-seal { opacity: 1; transform: scale(1) rotate(0); }
+/* The tick draws itself just after the seal lands, so the two read as one
+   motion settling rather than a graphic appearing fully formed. */
+.qr.is-paid .qr-seal-tick { animation: drawTick .34s var(--ease) .14s forwards; }
+@keyframes drawTick { to { stroke-dashoffset: 0; } }
+
+/* The code steps back once it's been honoured. */
+.qr.is-paid img { filter: saturate(.15) opacity(.32); transition: filter .34s var(--ease); }
+.qr.is-paid figcaption { color: var(--success); }
+.qr.is-paid figcaption::before { background: var(--success); animation: none; }
+
+@media (max-width: 620px) { .qr-seal { top: 100px; } }
+
+/* The panel collapses out rather than vanishing, so the eye can follow the
+   handoff up to the result. */
+.invoice.is-leaving {
+  animation: invoiceOut .38s var(--ease) forwards;
+  pointer-events: none;
+  overflow: hidden;
+}
+@keyframes invoiceOut {
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(.985);
+    height: 0;
+    margin-top: 0; padding-top: 0; padding-bottom: 0;
+    border-width: 0;
+  }
+}
+
+/* Steps answer the pointer so the sequence feels handled rather than printed. */
+.steps li {
+  transition: transform var(--mid) var(--spring);
+}
+.steps li:hover { transform: translateY(-3px); }
+.step-n { transition: letter-spacing var(--mid) var(--ease); }
+.steps li:hover .step-n { letter-spacing: .17em; }
+
+/* Motion here is a layer over a design that already works without it — the
+   grid's pointer light, the sparks, the ripples and the sweeps all stop, and
+   what remains is the same page. */
+@media (prefers-reduced-motion: reduce) {
+  .grid::after { display: none; }
+  .btn-primary::after { display: none; }
+  .ripple, .sparks { display: none; }
+  .result.is-fresh { background-image: none; }
+  .steps li:hover { transform: none; }
+  .steps li:hover .step-n { letter-spacing: .1em; }
+  .row-slug::after { opacity: .65; transform: none; }
+  .nav-icon:hover { transform: none; }
+  /* The jaws still close — it is one static step, and it is the whole idea. */
+  .btn-sheen::after { transition: none; }
+  /* The seal still lands, drawn rather than animated into place. */
+  .qr.is-paid .qr-seal { opacity: 1; transform: none; }
+  .qr-seal-tick { stroke-dashoffset: 0; }
 }
