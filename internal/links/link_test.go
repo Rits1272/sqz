@@ -2,7 +2,11 @@ package links
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,5 +201,48 @@ func TestValidateDestinationLength(t *testing.T) {
 	long := "https://example.com/" + string(make([]byte, MaxDestinationLen))
 	if err := ValidateDestination(long, selfHosts); !errors.Is(err, ErrDestTooLong) {
 		t.Errorf("got %v, want ErrDestTooLong", err)
+	}
+}
+
+// TestReservedSlugsCoverEdgeRoutes pins reservedSlugs against nginx.conf.
+//
+// The paywall charges at the edge, before sqzd validates anything. A slug that
+// nginx terminates but ValidateSlug accepts is therefore a link the user pays
+// for and can never use, with no refund path — which is exactly what happened
+// with sitemap.xml. Parsing the real config keeps the two from drifting.
+func TestReservedSlugsCoverEdgeRoutes(t *testing.T) {
+	conf, err := os.ReadFile(filepath.Join("..", "..", "nginx", "nginx.conf"))
+	if err != nil {
+		t.Fatalf("read nginx.conf: %v", err)
+	}
+
+	// `location = /x` and `location /x/` both shadow a single-segment slug /x.
+	re := regexp.MustCompile(`(?m)^\s*location\s+(?:=\s+)?/([^\s/{]+)/?\s*\{`)
+	matches := re.FindAllStringSubmatch(string(conf), -1)
+	if len(matches) == 0 {
+		t.Fatal("parsed no location blocks out of nginx.conf — the regex has rotted")
+	}
+
+	for _, m := range matches {
+		seg := m[1]
+		if err := ValidateSlug(seg); err != nil {
+			continue // already unusable as a slug (bad charset, too long)
+		}
+		if !reservedSlugs[strings.ToLower(seg)] {
+			t.Errorf("nginx terminates /%s but it is not in reservedSlugs — a user could pay for it and it would never resolve", seg)
+		}
+	}
+}
+
+func TestValidateSlugRejectsUppercase(t *testing.T) {
+	// Uppercase must be refused, not folded: slugs are claimed globally by
+	// exact bytes, so "Google" and "google" would be separate permanent claims.
+	for _, slug := range []string{"Google", "GOOGLE", "GoOgLe", "launcH"} {
+		if err := ValidateSlug(slug); !errors.Is(err, ErrSlugCharset) {
+			t.Errorf("ValidateSlug(%q) = %v, want ErrSlugCharset", slug, err)
+		}
+	}
+	if err := ValidateSlug("google-launch_1.0"); err != nil {
+		t.Errorf("ValidateSlug on a valid lowercase slug = %v, want nil", err)
 	}
 }

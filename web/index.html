@@ -75,8 +75,8 @@
     </a>
 
     <div id="signin-group" class="signin-group">
-      <button id="signin" class="btn btn-ghost" type="button">Connect key</button>
-      <button id="signin-local" class="btn btn-ghost" type="button">Create key</button>
+      <button id="signin-local" class="btn btn-key" type="button">Create a key</button>
+      <button id="signin" class="btn btn-ghost" type="button">I have an extension</button>
       <button id="signin-import" class="linklike" type="button">Import</button>
     </div>
     <div id="identity" class="account" hidden>
@@ -102,8 +102,12 @@
       <p class="modal-warn">This key lives in <strong>this browser</strong>. Save it now — if you clear
         your browser or switch devices without it, the links you make are gone for good, and anyone
         with this key controls them. Keep it secret.</p>
+      <!-- The key is masked until asked for. It used to render in cleartext the
+           instant the dialog opened, which loses your identity to anyone
+           screen-sharing or standing behind you. Copy still works while masked. -->
       <div class="nsec-row">
-        <code id="nsec-out" class="nsec"></code>
+        <code id="nsec-out" class="nsec is-masked"></code>
+        <button id="nsec-reveal" class="btn btn-soft" type="button" aria-pressed="false">Reveal</button>
         <button id="nsec-copy" class="btn btn-soft btn-copy" type="button"><span class="copy-label">Copy</span></button>
       </div>
       <div class="modal-acts">
@@ -182,13 +186,14 @@
 
       <div class="compose-row">
         <div class="field field-name">
-          <label for="slug">Custom name <span class="opt">optional · 500 sats</span></label>
+          <label for="slug">Custom name <span class="opt">optional · <span id="custom-price">500 sats</span></span></label>
           <div class="prefixed">
             <span class="prefix" id="slug-prefix">sqzit.in/</span>
             <input id="slug" name="slug" type="text" spellcheck="false" maxlength="64"
-                   autocapitalize="off" autocorrect="off" placeholder="auto">
+                   autocapitalize="off" autocorrect="off" placeholder="auto"
+                   aria-describedby="slug-hint">
           </div>
-          <span class="slug-hint" id="slug-hint" hidden></span>
+          <span class="slug-hint" id="slug-hint" role="status" aria-live="polite" hidden></span>
         </div>
 
         <button id="squeeze" class="btn btn-primary" type="submit">
@@ -219,10 +224,10 @@
 
     <!-- The payoff. The ratio gets the expressive moment because it is the
          one number that says the product worked. -->
-    <output class="result" id="result" hidden>
+    <output class="result" id="result" role="status" aria-live="polite" hidden>
       <div class="result-top">
         <span class="result-tag"><span class="result-dot" aria-hidden="true"></span>Live</span>
-        <span class="result-ratio" id="result-ratio" aria-live="polite"></span>
+        <span class="result-ratio" id="result-ratio"></span>
       </div>
       <div class="result-url">
         <a id="result-url" href="#" rel="noopener"></a>
@@ -233,7 +238,7 @@
       <p class="result-note" id="result-note"></p>
     </output>
 
-    <p class="notice" id="notice" hidden></p>
+    <p class="notice" id="notice" role="status" aria-live="polite" hidden></p>
   </section>
 
   <!-- Public leaderboard: opted-in links, most-clicked first. Free for anyone
@@ -248,8 +253,8 @@
        every route is offered rather than one being forced. -->
   <section class="invoice" id="invoice" hidden aria-labelledby="invoice-title">
     <div class="invoice-head">
-      <h2 id="invoice-title">Scan to pay <span class="invoice-amount">10 sats</span></h2>
-      <p>Point any Lightning wallet at the code below. Your link publishes the
+      <h2 id="invoice-title">Scan to pay <span class="invoice-amount"></span></h2>
+      <p id="invoice-lead">Point any Lightning wallet at the code below. Your link publishes the
          moment it's paid. Paying needs a Lightning wallet — not a nostr one.</p>
     </div>
 
@@ -265,7 +270,7 @@
                 stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </span>
-      <figcaption id="qr-status">Waiting for payment…</figcaption>
+      <figcaption id="qr-status" role="status" aria-live="polite">Waiting for payment…</figcaption>
     </figure>
 
     <div class="invoice-string">
