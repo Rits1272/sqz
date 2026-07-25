@@ -143,22 +143,33 @@
 
       <div class="field">
         <div class="field-top">
-          <label for="url">Paste a long URL</label>
+          <span class="field-lede">
+            <label for="url">Paste a long URL</label>
+            <!-- Echoes back the host actually parsed out of what was pasted, so
+                 a URL too long to read in the box can still be checked at a
+                 glance. Turns red if the link points back at sqz. -->
+            <span class="host-chip" id="url-host" hidden></span>
+          </span>
           <span class="meter" id="meter" hidden>
             <span class="meter-track" aria-hidden="true"><i class="meter-fill" id="meter-fill"></i></span>
             <span class="meter-val"><b id="meter-val">0</b> chars</span>
           </span>
         </div>
         <input id="url" name="url" type="url" inputmode="url" spellcheck="false"
+               autocapitalize="off" autocorrect="off"
                placeholder="https://example.com/a/very/long/address" required>
       </div>
 
       <div class="compose-row">
         <div class="field field-name">
-          <label for="slug">Custom name <span class="opt">optional</span></label>
+          <div class="field-top">
+            <label for="slug">Custom name <span class="opt">optional</span></label>
+            <span class="field-hint" id="slug-hint" hidden></span>
+          </div>
           <div class="prefixed">
             <span class="prefix" id="slug-prefix">sqzit.in/</span>
-            <input id="slug" name="slug" type="text" spellcheck="false" maxlength="64" placeholder="auto">
+            <input id="slug" name="slug" type="text" spellcheck="false" maxlength="64"
+                   autocapitalize="off" autocorrect="off" placeholder="auto">
           </div>
         </div>
 
