@@ -710,6 +710,44 @@ func TestPublicLeaderboard(t *testing.T) {
 	}
 }
 
+// Replaying events rebuilds the index, and a contested slug goes to whoever's
+// event is replayed first (reconcile replays oldest-first).
+func TestReindexRebuildsAndFirstClaimWins(t *testing.T) {
+	_, st := newTestServer(t)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := New(Config{BaseURL: testBase, Domain: "sqz.test", SelfHosts: []string{"sqz.test"}}, st, log)
+	ctx := context.Background()
+
+	skA, pkA, _ := newKey(t)
+	skB, _, _ := newKey(t)
+
+	// A's event is replayed first, so A wins the contested slug.
+	if err := srv.reindex(ctx, linkEvent(t, skA, "hot", "https://example.com/a")); err != nil {
+		t.Fatalf("reindex A: %v", err)
+	}
+	if err := srv.reindex(ctx, linkEvent(t, skB, "hot", "https://example.com/b")); err != nil {
+		t.Fatalf("reindex B: %v", err)
+	}
+
+	owner, err := st.SlugOwner(ctx, "hot")
+	if err != nil || owner != pkA {
+		t.Errorf("hot should belong to first claimer A: owner=%s err=%v", owner, err)
+	}
+	link, err := st.GetLink(ctx, pkA, "hot")
+	if err != nil || link.Destination != "https://example.com/a" {
+		t.Errorf("hot should resolve to A's destination: %+v %v", link, err)
+	}
+
+	// A non-sqz event (wrong d-tag) is a harmless no-op.
+	other := &nostr.Event{Kind: links.Kind, CreatedAt: nostr.Now(), Tags: nostr.Tags{{"d", "other:x"}, {"r", "https://example.com/x"}}}
+	if err := other.Sign(skA); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if err := srv.reindex(ctx, other); err != nil {
+		t.Errorf("non-sqz event should be a no-op, got %v", err)
+	}
+}
+
 // A prefix collision must extend rather than hand one key's prefix to another.
 func TestNpubPrefixCollisionExtends(t *testing.T) {
 	_, st := newTestServer(t)

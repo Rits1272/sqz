@@ -118,6 +118,8 @@ services:
       # Guards /admin/rebuild. Leaving it unset disables that endpoint
       # entirely rather than leaving it open — see server.Config.AdminToken.
       SQZ_ADMIN_TOKEN: ${SQZ_ADMIN_TOKEN:-}
+      # Relays each signed link event is published to; empty uses the defaults.
+      SQZ_RELAYS: ${SQZ_RELAYS:-}
       # Public Firebase config from .env; unset API key disables analytics.
       SQZ_FIREBASE_API_KEY: ${SQZ_FIREBASE_API_KEY:-}
       SQZ_FIREBASE_AUTH_DOMAIN: ${SQZ_FIREBASE_AUTH_DOMAIN:-}

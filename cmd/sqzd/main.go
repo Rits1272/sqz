@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Rits1272/sqz/internal/relays"
 	"github.com/Rits1272/sqz/internal/server"
 	"github.com/Rits1272/sqz/internal/store"
 	"github.com/Rits1272/sqz/web"
@@ -70,10 +71,17 @@ func run(log *slog.Logger) error {
 		webFS = os.DirFS(dir)
 	}
 
+	// Relays every signed link event is published to. Comma-separated override
+	// via SQZ_RELAYS; the default set is a spread of widely-read public relays.
+	publisher := relays.New(
+		strings.Split(env("SQZ_RELAYS", "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net,wss://relay.nostr.band"), ","),
+		log,
+	)
+
 	addr := env("SQZ_LISTEN", ":8080")
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: server.New(cfg, st, log).WithWeb(webFS).Routes(),
+		Handler: server.New(cfg, st, log).WithWeb(webFS).WithPublisher(publisher).Routes(),
 
 		// A redirect is a Redis lookup; anything slower is a stuck client.
 		ReadHeaderTimeout: 5 * time.Second,
