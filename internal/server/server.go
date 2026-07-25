@@ -16,6 +16,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -102,6 +103,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/links/slug", s.handleGenerateSlug)
 	mux.HandleFunc("GET /api/links/available", s.handleSlugAvailable)
 	mux.HandleFunc("GET /api/links", s.handleListLinks)
+	mux.HandleFunc("GET /api/analytics", s.handleAnalytics)
+	mux.HandleFunc("GET /api/leaderboard", s.handleLeaderboard)
 	mux.HandleFunc("POST /admin/rebuild", s.handleRebuild)
 
 	// The web app. "/{$}" matches only the bare root, and "/assets/{file}" is
@@ -321,6 +324,12 @@ func (s *Server) createLink(w http.ResponseWriter, r *http.Request, requireIssue
 		return
 	}
 
+	// Sync the public leaderboard opt-in. A revoked link is never public;
+	// otherwise the event's `public` tag decides, so re-publishing toggles it.
+	if err := s.store.SetPublic(r.Context(), link.Slug, link.Public && !link.Revoked); err != nil {
+		s.log.Warn("set public", "slug", link.Slug, "err", err) // non-fatal
+	}
+
 	s.log.Info("link indexed", "coordinate", link.Coordinate(), "revoked", link.Revoked)
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -459,6 +468,81 @@ func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	writeJSON(w, http.StatusOK, map[string]any{"links": out})
+}
+
+// handleAnalytics returns an aggregate view over the caller's links: totals
+// plus a click-ranked leaderboard. It aggregates the same click counters the
+// links list exposes per link — no extra tracking. The nginx paywall gates it
+// (100 sats, one-time indefinite access); sqzd only authenticates the caller.
+func (s *Server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	auth, err := s.authenticate(r, nil)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid or missing NIP-98 authorization")
+		return
+	}
+
+	found, err := s.store.ListLinks(r.Context(), auth.PubKey)
+	if err != nil {
+		s.log.Error("analytics list", "pubkey", auth.PubKey, "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load analytics")
+		return
+	}
+
+	type row struct {
+		Slug        string `json:"slug"`
+		ShortURL    string `json:"short_url"`
+		Destination string `json:"destination"`
+		Clicks      int64  `json:"clicks"`
+	}
+	rows := make([]row, 0, len(found))
+	var totalClicks int64
+	for _, l := range found {
+		clicks, err := s.store.Clicks(r.Context(), l.PubKey, l.Slug)
+		if err != nil {
+			s.log.Warn("analytics clicks", "slug", l.Slug, "err", err)
+		}
+		totalClicks += clicks
+		rows = append(rows, row{
+			Slug:        l.Slug,
+			ShortURL:    s.cfg.BaseURL + "/" + l.Slug,
+			Destination: l.Destination,
+			Clicks:      clicks,
+		})
+	}
+	// Leaderboard: most-clicked first.
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Clicks > rows[j].Clicks })
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"total_links":  len(rows),
+		"total_clicks": totalClicks,
+		"links":        rows,
+	})
+}
+
+// leaderboardSize caps the public board.
+const leaderboardSize = 10
+
+// handleLeaderboard returns the most-clicked opted-in links. Public and
+// unauthenticated — it's the free engagement surface on the landing page. Only
+// links whose owners opted in appear, and only slug + click count is exposed
+// (never the destination), so the board can't become a one-click pipe to a
+// featured link.
+func (s *Server) handleLeaderboard(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.store.PublicLeaderboard(r.Context(), leaderboardSize)
+	if err != nil {
+		s.log.Error("leaderboard", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not load leaderboard")
+		return
+	}
+	out := make([]map[string]any, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]any{
+			"slug":      e.Slug,
+			"short_url": s.cfg.BaseURL + "/" + e.Slug,
+			"clicks":    e.Clicks,
+		})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"links": out})
 }
 

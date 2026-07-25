@@ -46,6 +46,11 @@ const ui = {
   invoiceOpen: el("invoice-open"), invoiceCopy: el("invoice-copy"),
   links: el("links"), linksBody: el("links-body"), linksCount: el("links-count"),
   footDomain: el("foot-domain"),
+  analyticsBtn: el("analytics-btn"), analyticsModal: el("analytics-modal"),
+  analyticsClose: el("analytics-close"),
+  anClicks: el("an-clicks"), anLinks: el("an-links"), anList: el("an-list"), anEmpty: el("an-empty"),
+  publicOptin: el("public-optin"),
+  board: el("board"), boardList: el("board-list"),
 };
 
 const state = {
@@ -436,9 +441,10 @@ async function authHeader(method, path, body) {
   return "Nostr " + btoa(JSON.stringify(signed));
 }
 
-async function signLinkEvent(slug, destination, title) {
+async function signLinkEvent(slug, destination, title, isPublic) {
   const tags = [["d", SLUG_PREFIX + slug], ["r", destination]];
   if (title) tags.push(["title", title]);
+  if (isPublic) tags.push(["public", "1"]);
 
   return state.signer.signEvent({
     kind: KIND_LINK,
@@ -573,6 +579,7 @@ async function payWithWebln(invoice) {
    field or a WebLN payment. */
 async function completePendingPayment(preimage) {
   if (!pendingPayment) return;
+  if (pendingPayment.kind === "analytics") return completeAnalyticsUnlock(preimage);
   const { body, macaroon, event, path } = pendingPayment;
 
   // Re-sign NIP-98 fresh. The original was signed when Shorten was clicked, and
@@ -668,6 +675,148 @@ async function loadLinks() {
   } catch {
     // A failed listing must never block creating a link.
   }
+}
+
+/* ------------------------------------------------------------ leaderboard */
+
+/* Public top-links board. Free and unauthenticated — the engagement surface on
+   the landing page. Only opted-in links appear; the section hides itself when
+   the board is empty. Rendered via textContent, never innerHTML. */
+async function loadLeaderboard() {
+  let data;
+  try {
+    const res = await fetch("/api/leaderboard");
+    if (!res.ok) return;
+    data = await res.json();
+  } catch {
+    return;
+  }
+  const rows = Array.isArray(data.links) ? data.links : [];
+  if (!rows.length) { ui.board.hidden = true; return; }
+
+  ui.boardList.replaceChildren();
+  rows.forEach((l, i) => {
+    const row = document.createElement("li");
+    row.className = "board-row";
+
+    const rank = document.createElement("span");
+    rank.className = "board-rank";
+    rank.textContent = String(i + 1);
+
+    const name = document.createElement("a");
+    name.className = "board-slug";
+    name.href = l.short_url;
+    name.textContent = "/" + l.slug;
+    name.target = "_blank";
+    name.rel = "noopener noreferrer";
+
+    const clicks = document.createElement("span");
+    clicks.className = "board-clicks";
+    clicks.textContent = `${(l.clicks ?? 0).toLocaleString()} clicks`;
+
+    row.append(rank, name, clicks);
+    ui.boardList.append(row);
+  });
+  ui.board.hidden = false;
+}
+
+/* -------------------------------------------------------------- analytics */
+
+const ANALYTICS_CRED = "sqz:analytics-l402";
+
+/* Open the paid analytics dashboard. Reuses a stored L402 credential when the
+   100-sat unlock has already been bought (indefinite access), otherwise runs
+   the invoice flow and stores the credential on success. */
+async function openAnalytics() {
+  if (!state.signer) {
+    say("Sign in to see your analytics.", "note");
+    return;
+  }
+  const nostrCred = await authHeader("GET", "/api/analytics", null);
+  const headers = { "X-Nostr-Authorization": nostrCred };
+  const stored = localStorage.getItem(ANALYTICS_CRED);
+  if (stored) headers.Authorization = `L402 ${stored}`;
+
+  let res;
+  try {
+    res = await fetch("/api/analytics", { headers });
+  } catch {
+    say("Could not reach analytics.", "error");
+    return;
+  }
+
+  if (res.status === 402) {
+    const challenge = parseChallenge(res.headers.get("WWW-Authenticate"));
+    if (!challenge) {
+      say("Payment is required, but no invoice came back.", "error");
+      return;
+    }
+    pendingPayment = { kind: "analytics", ...challenge };
+    showInvoice(res.headers.get("WWW-Authenticate"));
+    const amt = document.querySelector(".invoice-amount");
+    if (amt) amt.textContent = "100 sats"; // unlock price, not the link tier
+    return;
+  }
+  if (res.status === 401) {
+    say("Sign in to see your analytics.", "note");
+    return;
+  }
+  if (!res.ok) {
+    say("Could not load analytics.", "error");
+    return;
+  }
+  renderAnalytics(await res.json());
+}
+
+/* Retry the analytics request with a fresh preimage, store the credential for
+   next time, and reveal the dashboard. */
+async function completeAnalyticsUnlock(preimage) {
+  const { macaroon } = pendingPayment;
+  const cred = `${macaroon}:${preimage.trim()}`;
+  const nostrCred = await authHeader("GET", "/api/analytics", null);
+  const res = await fetch("/api/analytics", {
+    headers: { "X-Nostr-Authorization": nostrCred, Authorization: `L402 ${cred}` },
+  });
+  if (res.ok) {
+    localStorage.setItem(ANALYTICS_CRED, cred);
+    pendingPayment = null;
+    window.sqzTrack?.("analytics_unlocked", { amount_sats: 100 });
+    await settleInvoice();
+    renderAnalytics(await res.json());
+    return;
+  }
+  say("That didn't unlock analytics — check the preimage and try again.", "error");
+}
+
+/* Fill the dashboard from the aggregate response and show it. Rendered from
+   response data, so every value goes through textContent, never innerHTML. */
+function renderAnalytics(data) {
+  ui.anClicks.textContent = (data.total_clicks ?? 0).toLocaleString();
+  ui.anLinks.textContent = (data.total_links ?? 0).toLocaleString();
+
+  const rows = Array.isArray(data.links) ? data.links : [];
+  ui.anList.replaceChildren();
+  ui.anEmpty.hidden = rows.length > 0;
+  for (const l of rows) {
+    const row = document.createElement("div");
+    row.className = "an-row";
+
+    const name = document.createElement("a");
+    name.className = "an-slug";
+    name.href = l.short_url;
+    name.textContent = "/" + l.slug;
+    name.target = "_blank";
+    name.rel = "noopener noreferrer";
+
+    const clicks = document.createElement("span");
+    clicks.className = "an-clicks";
+    clicks.textContent = `${(l.clicks ?? 0).toLocaleString()} clicks`;
+
+    row.append(name, clicks);
+    ui.anList.append(row);
+  }
+
+  ui.analyticsModal.hidden = false;
 }
 
 function showInvoice(wwwAuthenticate) {
@@ -1023,6 +1172,10 @@ ui.signinImport.addEventListener("click", () => showKeyModal("import"));
 ui.keyModalClose.addEventListener("click", hideKeyModal);
 ui.backupDone.addEventListener("click", hideKeyModal);
 ui.keyModal.addEventListener("click", (e) => { if (e.target === ui.keyModal) hideKeyModal(); });
+
+ui.analyticsBtn.addEventListener("click", openAnalytics);
+ui.analyticsClose.addEventListener("click", () => { ui.analyticsModal.hidden = true; });
+ui.analyticsModal.addEventListener("click", (e) => { if (e.target === ui.analyticsModal) ui.analyticsModal.hidden = true; });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !ui.keyModal.hidden) hideKeyModal(); });
 wireCopy(ui.nsecCopy, () => ui.nsecOut.textContent, "Copy");
 
@@ -1100,14 +1253,16 @@ ui.form.addEventListener("submit", async (e) => {
 
   try {
     const slug = custom || (await fetchServerSlug());
-    const event = await signLinkEvent(slug, destination, "");
+    const event = await signLinkEvent(slug, destination, "", ui.publicOptin.checked);
     setWaiting(true, "Publishing");
 
     const data = await createLink(event, path);
     showResult(destination, data.short_url);
     ui.slug.value = "";
+    ui.publicOptin.checked = false;
     refreshSlugState();
     await loadLinks();
+    loadLeaderboard();
   } catch (err) {
     if (err.message !== PAYMENT_PENDING) {
       say(err.message || "Could not shorten that link.", "error");
@@ -1192,6 +1347,7 @@ ui.preimageSubmit.addEventListener("click", async () => {
   neutralNamespace();
   measureInput();
   trackPointer();
+  loadLeaderboard();
 
   // Reconnect to the signer used last time. Extension: only if it's present
   // (avoids errors). Browser key: only if one is actually stored.

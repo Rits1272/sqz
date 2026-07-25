@@ -79,6 +79,11 @@ type Link struct {
 	// destination. The event still exists on relays — that is how revocation
 	// propagates — but the link must stop resolving.
 	Revoked bool
+
+	// Public is true when the owner opted this link into the public
+	// leaderboard, via a "public" tag on the event. Opt-in, so a link is only
+	// ever surfaced globally because its owner chose to.
+	Public bool
 }
 
 // Expired reports whether the link's NIP-40 expiration has passed.
@@ -124,6 +129,7 @@ func Parse(evt *nostr.Event, selfHosts []string) (*Link, error) {
 		Slug:      slug,
 		Title:     tagValue(evt.Tags, "title"),
 		CreatedAt: evt.CreatedAt.Time(),
+		Public:    tagValue(evt.Tags, "public") == "1",
 	}
 
 	// Parsed here rather than via nip40.GetExpiration, which collapses "no

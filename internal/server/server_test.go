@@ -614,6 +614,102 @@ func available(t *testing.T, ts *httptest.Server, slug string) bool {
 	return out.Available
 }
 
+// The analytics endpoint totals clicks and ranks links most-clicked first.
+// (Tests hit sqzd directly, so the nginx paywall isn't in the path.)
+func TestAnalyticsAggregates(t *testing.T) {
+	ts, st := newTestServer(t)
+	sk, pk, _ := newKey(t)
+	ctx := context.Background()
+
+	for _, slug := range []string{"aaa", "bbb"} {
+		resp := createLink(t, ts, sk, linkEvent(t, sk, slug, "https://example.com/"+slug))
+		resp.Body.Close()
+	}
+	for i := 0; i < 3; i++ {
+		if err := st.RecordClick(ctx, pk, "aaa"); err != nil {
+			t.Fatalf("click: %v", err)
+		}
+	}
+	if err := st.RecordClick(ctx, pk, "bbb"); err != nil {
+		t.Fatalf("click: %v", err)
+	}
+
+	auth := &nostr.Event{
+		Kind:      nip98.KindHTTPAuth,
+		CreatedAt: nostr.Now(),
+		Tags:      nostr.Tags{{"u", testBase + "/api/analytics"}, {"method", "GET"}},
+	}
+	if err := auth.Sign(sk); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	req, _ := http.NewRequest("GET", ts.URL+"/api/analytics", nil)
+	req.Header.Set("Authorization", "Nostr "+base64.StdEncoding.EncodeToString([]byte(auth.String())))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("analytics: got %d, body %s", resp.StatusCode, b)
+	}
+
+	var out struct {
+		TotalLinks  int `json:"total_links"`
+		TotalClicks int `json:"total_clicks"`
+		Links       []struct {
+			Slug   string `json:"slug"`
+			Clicks int    `json:"clicks"`
+		} `json:"links"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.TotalLinks != 2 || out.TotalClicks != 4 {
+		t.Errorf("totals: got links=%d clicks=%d, want 2/4", out.TotalLinks, out.TotalClicks)
+	}
+	if len(out.Links) != 2 || out.Links[0].Slug != "aaa" {
+		t.Errorf("leaderboard not ranked by clicks: %+v", out.Links)
+	}
+}
+
+// The public leaderboard shows only opted-in links, ranked by clicks.
+func TestPublicLeaderboard(t *testing.T) {
+	ts, st := newTestServer(t)
+	sk, pk, _ := newKey(t)
+	ctx := context.Background()
+
+	resp := createLink(t, ts, sk, linkEvent(t, sk, "pub", "https://example.com/pub", nostr.Tag{"public", "1"}))
+	resp.Body.Close()
+	resp = createLink(t, ts, sk, linkEvent(t, sk, "priv", "https://example.com/priv"))
+	resp.Body.Close()
+
+	for i := 0; i < 5; i++ {
+		st.RecordClick(ctx, pk, "pub")
+	}
+	for i := 0; i < 9; i++ {
+		st.RecordClick(ctx, pk, "priv") // more clicks, but not opted in
+	}
+
+	r, err := http.Get(ts.URL + "/api/leaderboard")
+	if err != nil {
+		t.Fatalf("leaderboard: %v", err)
+	}
+	defer r.Body.Close()
+	var out struct {
+		Links []struct {
+			Slug   string `json:"slug"`
+			Clicks int    `json:"clicks"`
+		} `json:"links"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Links) != 1 || out.Links[0].Slug != "pub" || out.Links[0].Clicks != 5 {
+		t.Errorf("leaderboard should be only opted-in 'pub' with 5 clicks: %+v", out.Links)
+	}
+}
+
 // A prefix collision must extend rather than hand one key's prefix to another.
 func TestNpubPrefixCollisionExtends(t *testing.T) {
 	_, st := newTestServer(t)
