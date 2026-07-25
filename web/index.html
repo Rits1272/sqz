@@ -242,10 +242,12 @@
   </section>
 
   <!-- Public leaderboard: opted-in links, most-clicked first. Free for anyone
-       arriving on the page; hides itself until there's something to show. -->
+       arriving on the page. Always shown so it's discoverable; an empty state
+       stands in until someone opts a link in. -->
   <section class="board" id="board" data-enter="4" aria-labelledby="board-title" hidden>
     <h2 id="board-title" class="board-title">Top links on sqz</h2>
     <ol class="board-list" id="board-list"></ol>
+    <p class="board-empty" id="board-empty" hidden>No public links yet. Tick “List this on the public leaderboard” when you shorten one.</p>
   </section>
 
   <!-- Payment. Shown whenever the paywall asks — the invoice leads, always

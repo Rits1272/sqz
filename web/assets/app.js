@@ -52,7 +52,7 @@ const ui = {
   analyticsClose: el("analytics-close"),
   anClicks: el("an-clicks"), anLinks: el("an-links"), anList: el("an-list"), anEmpty: el("an-empty"),
   publicOptin: el("public-optin"),
-  board: el("board"), boardList: el("board-list"),
+  board: el("board"), boardList: el("board-list"), boardEmpty: el("board-empty"),
 };
 
 const state = {
@@ -359,6 +359,21 @@ const browserSigner = {
 
 /* Connect via a signing extension (Alby, nos2x). The key stays in the
    extension — sqz never sees it. */
+/* Resolve once window.nostr is present, polling briefly since extensions inject
+   it asynchronously. Resolves false if it never shows up within the window. */
+function waitForNostr(timeoutMs = 3000) {
+  if (window.nostr) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const start = performance.now();
+    const tick = () => {
+      if (window.nostr) return resolve(true);
+      if (performance.now() - start > timeoutMs) return resolve(false);
+      setTimeout(tick, 100);
+    };
+    tick();
+  });
+}
+
 async function connectExtension() {
   if (!window.nostr) {
     sayNodes(
@@ -713,7 +728,6 @@ async function payWithWebln(invoice) {
    field or a WebLN payment. */
 async function completePendingPayment(preimage) {
   if (!pendingPayment) return;
-  if (pendingPayment.kind === "analytics") return completeAnalyticsUnlock(preimage);
   const { body, macaroon, event, path } = pendingPayment;
 
   // Re-sign NIP-98 fresh. The original was signed when Shorten was clicked, and
@@ -811,8 +825,9 @@ function settleInvoice() {
 async function loadLinks() {
   if (!state.pubkey) return;
   try {
-    const header = await authHeader("GET", "/api/links", null);
-    const res = await fetch("/api/links", { headers: { "X-Nostr-Authorization": header } });
+    // Free listing path (POST /api/links stays paywalled for creation).
+    const header = await authHeader("GET", "/api/links/mine", null);
+    const res = await fetch("/api/links/mine", { headers: { "X-Nostr-Authorization": header } });
     if (!res.ok) return;
 
     const { links = [] } = await res.json();
@@ -826,20 +841,23 @@ async function loadLinks() {
 /* ------------------------------------------------------------ leaderboard */
 
 /* Public top-links board. Free and unauthenticated — the engagement surface on
-   the landing page. Only opted-in links appear; the section hides itself when
-   the board is empty. Rendered via textContent, never innerHTML. */
+   the landing page. Only opted-in links appear; the section is always shown so
+   it's discoverable, with an empty state until someone opts in. Rendered via
+   textContent, never innerHTML. */
 async function loadLeaderboard() {
-  let data;
+  let rows = [];
   try {
     const res = await fetch("/api/leaderboard");
-    if (!res.ok) return;
-    data = await res.json();
+    if (res.ok) {
+      const data = await res.json();
+      rows = Array.isArray(data.links) ? data.links : [];
+    }
   } catch {
-    return;
+    // leave the board in its empty state
   }
-  const rows = Array.isArray(data.links) ? data.links : [];
-  if (!rows.length) { ui.board.hidden = true; return; }
 
+  ui.board.hidden = false;
+  ui.boardEmpty.hidden = rows.length > 0;
   ui.boardList.replaceChildren();
   rows.forEach((l, i) => {
     const row = document.createElement("li");
@@ -868,39 +886,19 @@ async function loadLeaderboard() {
 
 /* -------------------------------------------------------------- analytics */
 
-const ANALYTICS_CRED = "sqz:analytics-l402";
-
-/* Open the paid analytics dashboard. Reuses a stored L402 credential when the
-   100-sat unlock has already been bought (indefinite access), otherwise runs
-   the invoice flow and stores the credential on success. */
+/* Open the analytics dashboard. Free — reading your own stats comes with the
+   sats you paid to shorten; sqzd enforces NIP-98 so only the owner sees them. */
 async function openAnalytics() {
   if (!state.signer) {
     say("Sign in to see your analytics.", "note");
     return;
   }
-  const nostrCred = await authHeader("GET", "/api/analytics", null);
-  const headers = { "X-Nostr-Authorization": nostrCred };
-  const stored = localStorage.getItem(ANALYTICS_CRED);
-  if (stored) headers.Authorization = `L402 ${stored}`;
-
   let res;
   try {
-    res = await fetch("/api/analytics", { headers });
+    const nostrCred = await authHeader("GET", "/api/analytics", null);
+    res = await fetch("/api/analytics", { headers: { "X-Nostr-Authorization": nostrCred } });
   } catch {
     say("Could not reach analytics.", "error");
-    return;
-  }
-
-  if (res.status === 402) {
-    const challenge = parseChallenge(res.headers.get("WWW-Authenticate"));
-    if (!challenge) {
-      say("Payment is required, but no invoice came back.", "error");
-      return;
-    }
-    pendingPayment = { kind: "analytics", ...challenge };
-    showInvoice(res.headers.get("WWW-Authenticate"));
-    const amt = document.querySelector(".invoice-amount");
-    if (amt) amt.textContent = "100 sats"; // unlock price, not the link tier
     return;
   }
   if (res.status === 401) {
@@ -912,26 +910,6 @@ async function openAnalytics() {
     return;
   }
   renderAnalytics(await res.json());
-}
-
-/* Retry the analytics request with a fresh preimage, store the credential for
-   next time, and reveal the dashboard. */
-async function completeAnalyticsUnlock(preimage) {
-  const { macaroon } = pendingPayment;
-  const cred = `${macaroon}:${preimage.trim()}`;
-  const nostrCred = await authHeader("GET", "/api/analytics", null);
-  const res = await fetch("/api/analytics", {
-    headers: { "X-Nostr-Authorization": nostrCred, Authorization: `L402 ${cred}` },
-  });
-  if (res.ok) {
-    localStorage.setItem(ANALYTICS_CRED, cred);
-    pendingPayment = null;
-    window.sqzTrack?.("analytics_unlocked", { amount_sats: 100 });
-    await settleInvoice();
-    renderAnalytics(await res.json());
-    return;
-  }
-  say("That didn't unlock analytics — check the preimage and try again.", "error");
 }
 
 /* Fill the dashboard from the aggregate response and show it. Rendered from
@@ -1616,11 +1594,13 @@ ui.preimageSubmit.addEventListener("click", async () => {
   restorePayment();
   loadLeaderboard();
 
-  // Reconnect to the signer used last time. Extension: only if it's present
-  // (avoids errors). Browser key: only if one is actually stored.
+  // Reconnect to the signer used last time so a reload restores the session
+  // (and reloads the user's links). Extensions inject window.nostr
+  // asynchronously — often after boot — so poll briefly rather than giving up
+  // the instant it isn't there yet. Browser key: only if one is stored.
   const last = localStorage.getItem("sqz.lastSigner");
-  if (last === "extension" && window.nostr) {
-    connectExtension().catch(() => {});
+  if (last === "extension") {
+    waitForNostr().then((present) => { if (present) connectExtension().catch(() => {}); });
   } else if (last === "local") {
     localKeyReady().then((lk) => { if (lk && lk.exists()) connectLocal(); });
   }

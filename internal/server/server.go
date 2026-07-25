@@ -103,6 +103,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/links/slug", s.handleGenerateSlug)
 	mux.HandleFunc("GET /api/links/available", s.handleSlugAvailable)
 	mux.HandleFunc("GET /api/links", s.handleListLinks)
+	mux.HandleFunc("GET /api/links/mine", s.handleListLinks)
 	mux.HandleFunc("GET /api/analytics", s.handleAnalytics)
 	mux.HandleFunc("GET /api/leaderboard", s.handleLeaderboard)
 	mux.HandleFunc("POST /admin/rebuild", s.handleRebuild)
