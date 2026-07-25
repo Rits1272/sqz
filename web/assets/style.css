@@ -479,6 +479,7 @@ input:focus {
 .board-slug { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 13px; color: var(--ink); text-decoration: none; }
 .board-slug:hover { color: var(--violet); }
 .board-clicks { font-size: 12px; font-weight: 560; color: var(--ink-2); white-space: nowrap; }
+.board-empty { font-size: 13px; color: var(--ink-3); padding: 12px 14px; margin: 0; border: 1px dashed var(--line-2); border-radius: var(--r); }
 
 /* -------------------------------------------------------------- buttons */
 
