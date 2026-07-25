@@ -425,8 +425,28 @@ input:focus {
 .slug-hint.is-free { color: var(--success); }
 .slug-hint.is-taken { color: var(--danger); }
 
-.optin { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
-.optin input { accent-color: var(--violet); width: 15px; height: 15px; }
+.optin { display: inline-flex; align-items: center; gap: 9px; margin-top: 16px; font-size: 13px; color: var(--ink-2); cursor: pointer; user-select: none; }
+/* Custom checkbox — the browser default reads as a foreign white box against
+   the dark surfaces. Flat, bordered, violet when checked, to match .btn. */
+.optin input {
+  appearance: none; -webkit-appearance: none;
+  flex: none; width: 17px; height: 17px; margin: 0;
+  border: 1px solid var(--line-2); border-radius: 5px;
+  background: var(--surface-2); cursor: pointer;
+  position: relative;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.optin input:hover { border-color: var(--violet); }
+.optin input:checked { background: var(--violet); border-color: var(--violet); }
+/* Checkmark drawn as a rotated box edge — no glyph font dependency. */
+.optin input:checked::after {
+  content: ""; position: absolute; left: 5px; top: 2px;
+  width: 4px; height: 8px;
+  border: solid #fff; border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.optin input:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.optin:hover { color: var(--ink); }
 
 /* Public leaderboard */
 .board { margin-top: 40px; }
