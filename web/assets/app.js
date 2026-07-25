@@ -465,6 +465,9 @@ async function completePendingPayment(preimage) {
   if (res.ok) {
     pendingPayment = null;
     ui.invoice.hidden = true;
+
+    window.sqzTrack?.("payment_completed", { amount_sats: 10 });
+
     const data = await res.json().catch(() => ({}));
     const destination = event.tags.find((t) => t[0] === "r")?.[1] || "";
     showResult(destination, data.short_url);
@@ -623,6 +626,9 @@ function showResult(destination, shortUrl) {
     // Never dress a non-result up as a win.
     ui.resultRatio.textContent = "Ready";
   }
+
+  // Guard on destination so revocations (empty destination) aren't counted.
+  if (destination) window.sqzTrack?.("link_created", { method: state.signerKind });
 }
 
 /* ------------------------------------------------------------------ meter */
@@ -764,10 +770,11 @@ ui.preimageSubmit.addEventListener("click", async () => {
 /* ------------------------------------------------------------------- boot */
 
 (async function boot() {
+  let cfg = null;
   try {
     const res = await fetch("/api/config");
     if (res.ok) {
-      const cfg = await res.json();
+      cfg = await res.json();
       // NIP-98 binds signatures to the origin the SERVER verifies against, not
       // the one the browser happens to be on. A mismatch fails every signature,
       // so take the server's word for it.
@@ -780,6 +787,11 @@ ui.preimageSubmit.addEventListener("click", async () => {
   } catch {
     // Fall back to window.location.
   }
+
+  // Hand the config to the analytics module in index.html. The global covers
+  // the case where it initialised first; the event covers the reverse.
+  window.__sqzConfig = cfg;
+  window.dispatchEvent(new CustomEvent("sqz:config-ready", { detail: cfg }));
 
   neutralNamespace();
   measureInput();

@@ -1,0 +1,64 @@
+# Deploys sqz on every push to main, via a self-hosted runner on the
+# production VPS (needs the host Docker daemon and /opt/sqz).
+#
+# One-time host setup: /opt/sqz is a git checkout of this repo with a valid
+# .env beside it, and a self-hosted runner labelled `sqz-deploy` runs as a
+# service with Docker access.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: sqz-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, sqz-deploy]
+    timeout-minutes: 15
+    steps:
+      - name: Update /opt/sqz to this commit
+        run: |
+          set -euo pipefail
+          cd /opt/sqz
+          git fetch --prune origin
+          # .env is gitignored, so reset refreshes code without touching secrets.
+          git reset --hard "${GITHUB_SHA}"
+          echo "deploying $(git rev-parse --short HEAD): $(git log -1 --pretty=%s)"
+
+      - name: Build and recreate services
+        run: |
+          set -euo pipefail
+          cd /opt/sqz
+          docker compose build sqzd
+          docker compose up -d
+
+      - name: Validate and reload nginx
+        run: |
+          set -euo pipefail
+          cd /opt/sqz
+          # Test before reload so a broken config can't take the site down.
+          if docker compose exec -T nginx nginx -t; then
+            docker compose exec -T nginx nginx -s reload
+          else
+            echo "::error::nginx config invalid — not reloading"
+            exit 1
+          fi
+
+      - name: Health check
+        run: |
+          set -euo pipefail
+          cd /opt/sqz
+          for i in $(seq 1 10); do
+            if curl -fsS -o /dev/null "http://localhost:${SQZ_PORT:-8000}/health"; then
+              echo "healthy"; exit 0
+            fi
+            echo "waiting for sqzd health ($i/10)"; sleep 3
+          done
+          echo "::error::sqzd did not report healthy after deploy"
+          docker compose logs --tail=50 sqzd nginx
+          exit 1

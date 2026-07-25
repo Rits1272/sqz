@@ -124,6 +124,14 @@ services:
       # Guards /admin/rebuild. Leaving it unset disables that endpoint
       # entirely rather than leaving it open — see server.Config.AdminToken.
       SQZ_ADMIN_TOKEN: ${SQZ_ADMIN_TOKEN:-}
+      # Public Firebase config from .env; unset API key disables analytics.
+      SQZ_FIREBASE_API_KEY: ${SQZ_FIREBASE_API_KEY:-}
+      SQZ_FIREBASE_AUTH_DOMAIN: ${SQZ_FIREBASE_AUTH_DOMAIN:-}
+      SQZ_FIREBASE_PROJECT_ID: ${SQZ_FIREBASE_PROJECT_ID:-}
+      SQZ_FIREBASE_STORAGE_BUCKET: ${SQZ_FIREBASE_STORAGE_BUCKET:-}
+      SQZ_FIREBASE_MESSAGING_SENDER_ID: ${SQZ_FIREBASE_MESSAGING_SENDER_ID:-}
+      SQZ_FIREBASE_APP_ID: ${SQZ_FIREBASE_APP_ID:-}
+      SQZ_FIREBASE_MEASUREMENT_ID: ${SQZ_FIREBASE_MEASUREMENT_ID:-}
     depends_on:
       redis:
         condition: service_healthy
