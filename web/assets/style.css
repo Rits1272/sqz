@@ -298,6 +298,26 @@ main {
 
 label { font-size: 13px; font-weight: 530; color: var(--ink-2); }
 
+/* A destination the server would refuse. Held off until the field is done
+   being typed in — see markUrlProblem — so this is a verdict, not nagging. */
+input.is-invalid,
+input.is-invalid:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+/* Submitting something unusable gets a refusal you can feel. Small enough to
+   read as "not that" rather than as an error state. */
+.is-rejected { animation: rejected .3s var(--ease); }
+@keyframes rejected {
+  0%, 100% { transform: translateX(0); }
+  25%      { transform: translateX(-4px); }
+  75%      { transform: translateX(4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-rejected { animation: none; }
+}
+
 /* Label plus whatever the field has to say back about its own contents. */
 .field-lede { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 

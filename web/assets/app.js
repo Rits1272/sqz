@@ -884,6 +884,52 @@ function slugFromPaste(text) {
   }
 }
 
+/* Mirrors MaxDestinationLen in internal/links/link.go. */
+const MAX_DEST_LEN = 2048;
+
+/* Mirrors ValidateDestination. The server remains the authority — this exists
+   only so nobody reaches the paywall, pays, and *then* learns the destination
+   was never going to be accepted. Returns a message, or null when the URL is
+   fine.
+ *
+ * Every branch here corresponds to an error the server would have raised, so a
+ * change to ValidateDestination should be reflected here or the two drift into
+ * disagreeing about what is spendable. */
+function destinationProblem(raw) {
+  const dest = raw.trim();
+  if (!dest) return "Paste a URL to shorten.";
+  if (dest.length > MAX_DEST_LEN) {
+    return `That URL is ${dest.length} characters — the limit is ${MAX_DEST_LEN}.`;
+  }
+
+  let u;
+  try {
+    u = new URL(dest);
+  } catch {
+    return "That isn't a URL yet. Try something like example.com/page.";
+  }
+
+  // Only http/https reach a browser as a navigation; the rest are script
+  // execution or a local-resource read, and the server refuses them.
+  const scheme = u.protocol.replace(/:$/, "").toLowerCase();
+  if (scheme !== "http" && scheme !== "https") {
+    return `Links have to be http or https — “${scheme}” isn't allowed.`;
+  }
+  if (!u.host) return "That URL is missing a domain.";
+  if (u.hostname.toLowerCase() === displayHost().toLowerCase()) {
+    return "That already points at sqz — shortening it would just loop.";
+  }
+  return null;
+}
+
+/* Show or clear the field's invalid state. Held back until the user has
+   finished with the field: marking a half-typed URL wrong is nagging, and it
+   would be red for most of the time anyone spends typing. */
+function markUrlProblem(problem) {
+  ui.url.classList.toggle("is-invalid", Boolean(problem));
+  ui.url.setAttribute("aria-invalid", problem ? "true" : "false");
+}
+
 /* Echo the host back. The input scrolls to the tail of a long URL, so without
    this there is no way to confirm what was actually pasted. */
 function reflectUrlHost() {
@@ -937,11 +983,16 @@ ui.url.addEventListener("paste", () => setTimeout(() => {
 }, 0));
 
 // Leaving the field is the other safe moment to tidy: the user has finished
-// with it, so moving the caret costs nothing.
+// with it, so moving the caret costs nothing — and it is the first point at
+// which flagging a bad URL is fair rather than premature.
 ui.url.addEventListener("blur", () => {
   const tidied = normalizeUrl(ui.url.value);
   if (tidied !== ui.url.value) { ui.url.value = tidied; measureInput(); }
+  markUrlProblem(ui.url.value.trim() ? destinationProblem(ui.url.value) : null);
 });
+
+// Editing earns the benefit of the doubt back immediately.
+ui.url.addEventListener("input", () => markUrlProblem(null));
 
 ui.slug.addEventListener("paste", (e) => {
   const text = e.clipboardData?.getData("text");
@@ -1004,7 +1055,17 @@ ui.form.addEventListener("submit", async (e) => {
   // the URL before it gets signed into an event and paid for.
   const destination = normalizeUrl(ui.url.value);
   if (destination !== ui.url.value) { ui.url.value = destination; measureInput(); }
-  if (!destination) { ui.url.focus(); return; }
+  // The paywall sits in front of sqzd, so an invalid destination is charged
+  // for before it is ever validated. Refuse it here instead.
+  const problem = destinationProblem(destination);
+  if (problem) {
+    markUrlProblem(problem);
+    say(problem, "error");
+    replay(ui.url, "is-rejected");
+    ui.url.focus();
+    return;
+  }
+  markUrlProblem(null);
 
   // Signing in is an explicit choice now (extension vs browser key), so don't
   // silently pick one — point the user at the two options.
