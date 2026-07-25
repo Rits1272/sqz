@@ -26,3 +26,4 @@ coverage.*
 # Stray screenshot artifacts from CLI flag typos (e.g. a file literally
 # named `--full-page`).
 --*
+.claude/

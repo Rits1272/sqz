@@ -96,10 +96,17 @@ func linkEvent(t *testing.T, sk, slug, dest string, extra ...nostr.Tag) *nostr.E
 	return evt
 }
 
-// createLink posts a signed link event with a matching NIP-98 header.
+// createLink posts a signed link event with a matching NIP-98 header. It uses
+// the custom endpoint, which accepts a chosen slug — the shape most tests want.
 // authSK defaults to the event's signer unless overridden, which is how the
 // identity-mismatch case is exercised.
 func createLink(t *testing.T, ts *httptest.Server, authSK string, evt *nostr.Event) *http.Response {
+	return createLinkAt(t, ts, authSK, evt, "/api/links/custom")
+}
+
+// createLinkAt posts to a specific create endpoint so tests can exercise both
+// the custom tier and the issued-slug (auto) tier.
+func createLinkAt(t *testing.T, ts *httptest.Server, authSK string, evt *nostr.Event, path string) *http.Response {
 	t.Helper()
 
 	body, err := json.Marshal(createLinkRequest{Event: evt})
@@ -115,7 +122,7 @@ func createLink(t *testing.T, ts *httptest.Server, authSK string, evt *nostr.Eve
 		Kind:      nip98.KindHTTPAuth,
 		CreatedAt: nostr.Now(),
 		Tags: nostr.Tags{
-			{"u", testBase + "/api/links"},
+			{"u", testBase + path},
 			{"method", "POST"},
 			{"payload", hex.EncodeToString(sum[:])},
 		},
@@ -124,7 +131,7 @@ func createLink(t *testing.T, ts *httptest.Server, authSK string, evt *nostr.Eve
 		t.Fatalf("sign auth: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", ts.URL+"/api/links", strings.NewReader(string(body)))
+	req, err := http.NewRequest("POST", ts.URL+path, strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatalf("request: %v", err)
 	}
@@ -149,7 +156,7 @@ func noRedirectClient() *http.Client {
 // The end-to-end milestone: sign a link, index it, and get redirected.
 func TestCreateAndRedirect(t *testing.T) {
 	ts, _ := newTestServer(t)
-	sk, _, npub := newKey(t)
+	sk, _, _ := newKey(t)
 	const dest = "https://example.com/a/very/long/destination?x=1"
 
 	resp := createLink(t, ts, sk, linkEvent(t, sk, "launch", dest))
@@ -159,7 +166,8 @@ func TestCreateAndRedirect(t *testing.T) {
 		t.Fatalf("create: got %d, body %s", resp.StatusCode, body)
 	}
 
-	r, err := noRedirectClient().Get(ts.URL + "/" + npub + "/launch")
+	// Flat namespace: sqzit.in/<slug> resolves via the global slug owner.
+	r, err := noRedirectClient().Get(ts.URL + "/launch")
 	if err != nil {
 		t.Fatalf("redirect request: %v", err)
 	}
@@ -178,7 +186,7 @@ func TestCreateAndRedirect(t *testing.T) {
 // makes links user-owned and editable rather than write-once.
 func TestEditLinkChangesDestination(t *testing.T) {
 	ts, _ := newTestServer(t)
-	sk, _, npub := newKey(t)
+	sk, _, _ := newKey(t)
 
 	for _, dest := range []string{"https://example.com/first", "https://example.com/second"} {
 		resp := createLink(t, ts, sk, linkEvent(t, sk, "edit", dest))
@@ -187,7 +195,7 @@ func TestEditLinkChangesDestination(t *testing.T) {
 			t.Fatalf("create %s: got %d", dest, resp.StatusCode)
 		}
 
-		r, err := noRedirectClient().Get(ts.URL + "/" + npub + "/edit")
+		r, err := noRedirectClient().Get(ts.URL + "/edit")
 		if err != nil {
 			t.Fatalf("redirect: %v", err)
 		}
@@ -289,7 +297,7 @@ func TestReplayedAuthRejected(t *testing.T) {
 		Kind:      nip98.KindHTTPAuth,
 		CreatedAt: nostr.Now(),
 		Tags: nostr.Tags{
-			{"u", testBase + "/api/links"},
+			{"u", testBase + "/api/links/custom"},
 			{"method", "POST"},
 			{"payload", hex.EncodeToString(sum[:])},
 		},
@@ -300,7 +308,7 @@ func TestReplayedAuthRejected(t *testing.T) {
 	header := "Nostr " + base64.StdEncoding.EncodeToString([]byte(auth.String()))
 
 	send := func() int {
-		req, _ := http.NewRequest("POST", ts.URL+"/api/links", strings.NewReader(string(body)))
+		req, _ := http.NewRequest("POST", ts.URL+"/api/links/custom", strings.NewReader(string(body)))
 		req.Header.Set("Authorization", header)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -476,10 +484,11 @@ func TestAdminRebuildRequiresToken(t *testing.T) {
 // Short identity prefixes are what make sqz actually shorten. A full npub is
 // 63 characters, so the untruncated form produces URLs longer than most links
 // people want shortened.
-func TestShortIdentPrefix(t *testing.T) {
-	ts, st := newTestServer(t)
-	sk, _, npub := newKey(t)
-	ctx := context.Background()
+// The short URL is a flat sqzit.in/<slug> with no identity segment, and it
+// resolves via the global slug owner.
+func TestShortURLIsFlat(t *testing.T) {
+	ts, _ := newTestServer(t)
+	sk, _, _ := newKey(t)
 
 	resp := createLink(t, ts, sk, linkEvent(t, sk, "short", "https://example.com/very/long/path"))
 	defer resp.Body.Close()
@@ -490,51 +499,119 @@ func TestShortIdentPrefix(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-
-	if len(body.ShortURL) >= len(testBase)+len(npub) {
-		t.Errorf("short_url is not short: %d chars (%s)", len(body.ShortURL), body.ShortURL)
+	if want := testBase + "/short"; body.ShortURL != want {
+		t.Errorf("short_url: got %q, want %q", body.ShortURL, want)
 	}
 
-	ident := strings.Split(strings.TrimPrefix(body.ShortURL, testBase+"/"), "/")[0]
-	if !strings.HasPrefix(npub, ident) {
-		t.Errorf("ident %q is not a prefix of npub %q", ident, npub)
-	}
-	if len(ident) != store.MinNpubPrefix {
-		t.Errorf("ident length: got %d, want %d", len(ident), store.MinNpubPrefix)
-	}
-
-	// The truncated form must resolve.
-	r, err := noRedirectClient().Get(ts.URL + "/" + ident + "/short")
+	r, err := noRedirectClient().Get(ts.URL + "/short")
 	if err != nil {
-		t.Fatalf("truncated redirect: %v", err)
+		t.Fatalf("redirect: %v", err)
 	}
 	r.Body.Close()
 	if r.StatusCode != http.StatusFound {
-		t.Errorf("truncated form: got %d, want 302", r.StatusCode)
+		t.Errorf("flat form: got %d, want 302", r.StatusCode)
+	}
+}
+
+// TestIssuedSlugFlow covers the auto tier: a slug issued by /api/links/slug can
+// be created via /api/links, but a chosen slug there is refused.
+func TestIssuedSlugFlow(t *testing.T) {
+	ts, _ := newTestServer(t)
+	sk, _, _ := newKey(t)
+
+	// A chosen slug on the cheap endpoint is refused.
+	resp := createLinkAt(t, ts, sk, linkEvent(t, sk, "chosen", "https://example.com"), "/api/links")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("chosen slug on /api/links: got %d, want 403", resp.StatusCode)
 	}
 
-	// The full npub must keep working, so older links and anyone holding the
-	// whole key are unaffected.
-	r2, err := noRedirectClient().Get(ts.URL + "/" + npub + "/short")
+	// Reserve a slug, then create it on the cheap endpoint.
+	slug := reserveSlug(t, ts, sk)
+	resp = createLinkAt(t, ts, sk, linkEvent(t, sk, slug, "https://example.com"), "/api/links")
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("issued slug on /api/links: got %d, body %s", resp.StatusCode, b)
+	}
+}
+
+// reserveSlug asks /api/links/slug for a server-issued slug.
+func reserveSlug(t *testing.T, ts *httptest.Server, sk string) string {
+	t.Helper()
+	auth := &nostr.Event{
+		Kind:      nip98.KindHTTPAuth,
+		CreatedAt: nostr.Now(),
+		Tags: nostr.Tags{
+			{"u", testBase + "/api/links/slug"},
+			{"method", "POST"},
+		},
+	}
+	if err := auth.Sign(sk); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	req, _ := http.NewRequest("POST", ts.URL+"/api/links/slug", nil)
+	req.Header.Set("Authorization", "Nostr "+base64.StdEncoding.EncodeToString([]byte(auth.String())))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("full npub redirect: %v", err)
+		t.Fatalf("reserve: %v", err)
 	}
-	r2.Body.Close()
-	if r2.StatusCode != http.StatusFound {
-		t.Errorf("full npub form: got %d, want 302", r2.StatusCode)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("reserve slug: got %d", resp.StatusCode)
+	}
+	var out struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode slug: %v", err)
+	}
+	return out.Slug
+}
+
+// A custom slug is globally unique: a second key claiming it is refused, and
+// availability reflects the claim.
+func TestCustomSlugGlobalUniqueness(t *testing.T) {
+	ts, _ := newTestServer(t)
+	owner, _, _ := newKey(t)
+	other, _, _ := newKey(t)
+
+	if got := available(t, ts, "mine"); !got {
+		t.Fatalf("expected 'mine' available before claim")
 	}
 
-	// Assignment must be stable. If a prefix could change, every short URL
-	// already in circulation would silently break.
-	for i := 0; i < 3; i++ {
-		again, err := st.AssignNpubPrefix(ctx, npub, mustPubkey(t, sk))
-		if err != nil {
-			t.Fatalf("reassign: %v", err)
-		}
-		if again != ident {
-			t.Fatalf("prefix changed on call %d: %q != %q", i, again, ident)
-		}
+	resp := createLink(t, ts, owner, linkEvent(t, owner, "mine", "https://example.com/owner"))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("owner create: got %d", resp.StatusCode)
 	}
+
+	if got := available(t, ts, "mine"); got {
+		t.Errorf("expected 'mine' unavailable after claim")
+	}
+
+	resp = createLink(t, ts, other, linkEvent(t, other, "mine", "https://example.com/other"))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("other claiming taken slug: got %d, want 409", resp.StatusCode)
+	}
+}
+
+// available queries the public availability endpoint.
+func available(t *testing.T, ts *httptest.Server, slug string) bool {
+	t.Helper()
+	r, err := http.Get(ts.URL + "/api/links/available?slug=" + slug)
+	if err != nil {
+		t.Fatalf("available: %v", err)
+	}
+	defer r.Body.Close()
+	var out struct {
+		Available bool `json:"available"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return out.Available
 }
 
 // A prefix collision must extend rather than hand one key's prefix to another.
@@ -625,7 +702,7 @@ func TestNostrAuthHeaderResolvesCollision(t *testing.T) {
 		Kind:      nip98.KindHTTPAuth,
 		CreatedAt: nostr.Now(),
 		Tags: nostr.Tags{
-			{"u", testBase + "/api/links"},
+			{"u", testBase + "/api/links/custom"},
 			{"method", "POST"},
 			{"payload", hex.EncodeToString(sum[:])},
 		},
@@ -635,7 +712,7 @@ func TestNostrAuthHeaderResolvesCollision(t *testing.T) {
 	}
 	nostrCred := "Nostr " + base64.StdEncoding.EncodeToString([]byte(auth.String()))
 
-	req, _ := http.NewRequest("POST", ts.URL+"/api/links", strings.NewReader(string(body)))
+	req, _ := http.NewRequest("POST", ts.URL+"/api/links/custom", strings.NewReader(string(body)))
 	req.Header.Set("X-Nostr-Authorization", nostrCred)
 	// Simulate what nginx forwards after a settled L402 payment: Authorization
 	// holds the macaroon:preimage, which is not a NIP-98 credential.

@@ -7,9 +7,11 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -96,6 +98,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/qr", s.handleQR)
 	mux.HandleFunc("GET /.well-known/nostr.json", s.handleNIP05)
 	mux.HandleFunc("POST /api/links", s.handleCreateLink)
+	mux.HandleFunc("POST /api/links/custom", s.handleCreateLinkCustom)
+	mux.HandleFunc("POST /api/links/slug", s.handleGenerateSlug)
+	mux.HandleFunc("GET /api/links/available", s.handleSlugAvailable)
 	mux.HandleFunc("GET /api/links", s.handleListLinks)
 	mux.HandleFunc("POST /admin/rebuild", s.handleRebuild)
 
@@ -110,9 +115,12 @@ func (s *Server) Routes() http.Handler {
 		mux.Handle("GET /assets/{file}", files)
 	}
 
-	// The redirect route is last and most general. Go's ServeMux prefers more
-	// specific patterns, so the API routes above win over "/{ident}/{slug}".
-	mux.HandleFunc("GET /{ident}/{slug}", s.handleRedirect)
+	// Flat redirect is the current form: sqzit.in/<slug> resolves via the global
+	// slug owner. The two-segment form is kept so links minted under the old
+	// per-identity scheme keep resolving. Both are less specific than the API
+	// routes above, which therefore win.
+	mux.HandleFunc("GET /{slug}", s.handleRedirect)
+	mux.HandleFunc("GET /{ident}/{slug}", s.handleRedirectLegacy)
 
 	return mux
 }
@@ -121,18 +129,34 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// handleRedirect is the hot path. It reads only from Redis — never from relays
-// — so a slow or unreachable relay cannot delay or break a redirect.
+// handleRedirect is the hot path. It resolves the global slug to its owner and
+// redirects, reading only from Redis so a slow relay can never delay a redirect.
 func (s *Server) handleRedirect(w http.ResponseWriter, r *http.Request) {
-	ident := r.PathValue("ident")
 	slug := r.PathValue("slug")
+	pubkey, err := s.store.SlugOwner(r.Context(), slug)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			s.log.Error("resolve slug owner", "slug", slug, "err", err)
+		}
+		http.NotFound(w, r)
+		return
+	}
+	s.serveRedirect(w, r, pubkey, slug)
+}
 
-	pubkey, err := s.resolveIdentity(r.Context(), ident)
+// handleRedirectLegacy resolves the old two-segment /<ident>/<slug> form.
+func (s *Server) handleRedirectLegacy(w http.ResponseWriter, r *http.Request) {
+	pubkey, err := s.resolveIdentity(r.Context(), r.PathValue("ident"))
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	s.serveRedirect(w, r, pubkey, r.PathValue("slug"))
+}
 
+// serveRedirect looks up (pubkey, slug), records a click off the hot path, and
+// issues the redirect. Shared by both the flat and legacy routes.
+func (s *Server) serveRedirect(w http.ResponseWriter, r *http.Request, pubkey, slug string) {
 	link, err := s.store.GetLink(r.Context(), pubkey, slug)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
@@ -185,24 +209,6 @@ func (s *Server) resolveIdentity(ctx context.Context, ident string) (string, err
 	return "", store.ErrNotFound
 }
 
-// shortIdent returns the identity segment to put in a user-facing URL: their
-// assigned short npub prefix, falling back to the full npub if assignment
-// fails. A long URL is worse than an elegant one; a broken URL is worse than
-// both.
-func (s *Server) shortIdent(ctx context.Context, pubkey string) string {
-	npub := npubOrHex(pubkey)
-	if !strings.HasPrefix(npub, "npub1") {
-		return npub
-	}
-
-	prefix, err := s.store.AssignNpubPrefix(ctx, npub, pubkey)
-	if err != nil {
-		s.log.Warn("assign npub prefix", "pubkey", pubkey, "err", err)
-		return npub
-	}
-	return prefix
-}
-
 // createLinkRequest carries the user's signed link event.
 //
 // The event is sent directly rather than fetched from a relay by coordinate.
@@ -215,7 +221,19 @@ type createLinkRequest struct {
 	Relays []string     `json:"relays,omitempty"`
 }
 
+// handleCreateLink serves the cheaper tier: the slug must be one this server
+// issued (via /api/links/slug), so a chosen name can't sneak through here.
 func (s *Server) handleCreateLink(w http.ResponseWriter, r *http.Request) {
+	s.createLink(w, r, true)
+}
+
+// handleCreateLinkCustom serves the pricier tier, where the caller picks the
+// slug. No issued-slug check — the nginx paywall charges the higher amount.
+func (s *Server) handleCreateLinkCustom(w http.ResponseWriter, r *http.Request) {
+	s.createLink(w, r, false)
+}
+
+func (s *Server) createLink(w http.ResponseWriter, r *http.Request, requireIssued bool) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
@@ -263,6 +281,40 @@ func (s *Server) handleCreateLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Claiming a name only applies to a new link. Revoking (empty destination)
+	// is exempt — the owner is deleting their own link, not claiming a name — so
+	// revocation keeps working through the cheap endpoint.
+	if !link.Revoked {
+		// Cheap tier: the slug must be one this server issued, so a chosen name
+		// can't slip through at the auto price.
+		if requireIssued {
+			ok, err := s.store.ClaimIssuedSlug(r.Context(), auth.PubKey, link.Slug)
+			if err != nil {
+				s.log.Error("claim issued slug", "err", err)
+				writeError(w, http.StatusInternalServerError, "could not verify slug")
+				return
+			}
+			if !ok {
+				writeError(w, http.StatusForbidden,
+					"this slug was not issued by sqz; a chosen name is a custom link — POST /api/links/custom")
+				return
+			}
+		}
+
+		// Flat namespace: claim the global slug. Fails only if another key
+		// already owns it.
+		owned, err := s.store.ClaimSlugOwner(r.Context(), link.Slug, auth.PubKey)
+		if err != nil {
+			s.log.Error("claim slug owner", "err", err)
+			writeError(w, http.StatusInternalServerError, "could not claim slug")
+			return
+		}
+		if !owned {
+			writeError(w, http.StatusConflict, "that name is already taken")
+			return
+		}
+	}
+
 	if err := s.store.PutLink(r.Context(), link); err != nil {
 		s.log.Error("index link", "coordinate", link.Coordinate(), "err", err)
 		writeError(w, http.StatusInternalServerError, "could not index link")
@@ -273,9 +325,103 @@ func (s *Server) handleCreateLink(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"coordinate": link.Coordinate(),
-		"short_url":  s.cfg.BaseURL + "/" + s.shortIdent(r.Context(), link.PubKey) + "/" + link.Slug,
+		"short_url":  s.cfg.BaseURL + "/" + link.Slug,
 		"revoked":    link.Revoked,
 	})
+}
+
+// slugTTL is how long a server-issued slug stays claimable before it lapses.
+// Long enough to sign and pay the invoice, short enough that abandoned
+// reservations don't accumulate.
+const slugTTL = 15 * time.Minute
+
+// handleGenerateSlug issues a random, currently-free slug and reserves it for
+// the authenticated key to claim on the cheap create tier. It is public (no
+// paywall) — a slug is worthless until a paid, signed link claims it.
+func (s *Server) handleGenerateSlug(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
+	auth, err := s.authenticate(r, body)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid or missing NIP-98 authorization")
+		return
+	}
+
+	slug, err := s.freeSlug(r.Context())
+	if err != nil {
+		s.log.Error("generate slug", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not allocate a slug")
+		return
+	}
+	if err := s.store.IssueSlug(r.Context(), auth.PubKey, slug, slugTTL); err != nil {
+		s.log.Error("reserve slug", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not reserve slug")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"slug": slug})
+}
+
+// freeSlug returns a random slug not already owned in the global namespace.
+func (s *Server) freeSlug(ctx context.Context) (string, error) {
+	for i := 0; i < 8; i++ {
+		slug := randomSlug()
+		taken, err := s.store.SlugTaken(ctx, slug)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return slug, nil
+		}
+	}
+	return "", fmt.Errorf("could not find a free slug after 8 tries")
+}
+
+// handleSlugAvailable reports whether a custom slug is free to claim. Public and
+// best-effort — the ClaimSlugOwner at create time is the real guard. Invalid or
+// reserved slugs report unavailable, matching what a create would do.
+func (s *Server) handleSlugAvailable(w http.ResponseWriter, r *http.Request) {
+	slug := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("slug")))
+	resp := map[string]any{"slug": slug, "available": false}
+
+	if err := links.ValidateSlug(slug); err != nil {
+		if errors.Is(err, links.ErrSlugReserved) {
+			resp["reason"] = "reserved"
+		} else {
+			resp["reason"] = "invalid"
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	taken, err := s.store.SlugTaken(r.Context(), slug)
+	if err != nil {
+		s.log.Error("slug availability", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not check availability")
+		return
+	}
+	resp["available"] = !taken
+	if taken {
+		resp["reason"] = "taken"
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// randomSlug returns 7 lowercase base32 characters (~35 bits), collision-safe
+// within a single key's namespace and within the slug charset.
+func randomSlug() string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+	var b [7]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// rand.Read from crypto/rand does not fail in practice; fall back to a
+		// fixed but still-checked-for-collision value rather than panicking.
+		return "aaaaaaa"
+	}
+	for i := range b {
+		b[i] = alphabet[int(b[i])%len(alphabet)]
+	}
+	return string(b[:])
 }
 
 // handleListLinks returns the authenticated user's own links.
@@ -296,7 +442,6 @@ func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ident := s.shortIdent(r.Context(), auth.PubKey)
 	out := make([]map[string]any, 0, len(found))
 	for _, l := range found {
 		clicks, err := s.store.Clicks(r.Context(), l.PubKey, l.Slug)
@@ -308,7 +453,7 @@ func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
 			"slug":        l.Slug,
 			"destination": l.Destination,
 			"title":       l.Title,
-			"short_url":   s.cfg.BaseURL + "/" + ident + "/" + l.Slug,
+			"short_url":   s.cfg.BaseURL + "/" + l.Slug,
 			"created_at":  l.CreatedAt.Unix(),
 			"clicks":      clicks,
 		})
