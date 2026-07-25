@@ -1,10 +1,10 @@
 // Package links models a sqz short link as a nostr addressable event.
 //
 // A link is a kind 30078 (NIP-78 application-specific data) event whose `d`
-// tag is "sqz:<slug>" and whose `r` tag is the destination. Relays keep only
-// the newest event per (kind, pubkey, d), which gives us slug uniqueness per
-// identity for free — the entire reason sqz never has to arbitrate a global
-// namespace.
+// tag is "sqz:<slug>" and whose `r` tag is the destination. On relays the event
+// is addressable per (kind, pubkey, d). sqz layers a flat global namespace on
+// top: the store's slug-owner index binds each slug to one pubkey, so that
+// sqzit.in/<slug> resolves to a single link (first claim wins).
 //
 // The event is signed and published by the user's own client. sqz only ever
 // reads and validates it, and cannot forge one.

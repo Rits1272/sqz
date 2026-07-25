@@ -32,6 +32,7 @@ const ui = {
   nsecIn: el("nsec-in"), importSubmit: el("import-submit"), keyModalClose: el("keymodal-close"),
   identity: el("identity"), identityKey: el("identity-key"),
   form: el("form"), url: el("url"), slug: el("slug"), slugPrefix: el("slug-prefix"),
+  slugHint: el("slug-hint"), priceAmount: el("price-amount"),
   squeeze: el("squeeze"), btnLabel: el("btn-label"), btnMeta: el("btn-meta"),
   meter: el("meter"), meterFill: el("meter-fill"), meterVal: el("meter-val"),
   result: el("result"), resultUrl: el("result-url"),
@@ -53,7 +54,6 @@ const state = {
   npub: null,
   signer: null,      // active signer (extension or browser key)
   signerKind: null,  // "extension" | "local"
-  namespace: null,   // the short prefix the SERVER assigned, never guessed here
   links: [],
 };
 
@@ -101,25 +101,6 @@ function shortKey(npub) {
 
 /* Slug alphabet omits look-alike characters, so a name survives being read
    aloud or copied by hand. */
-function autoSlug() {
-  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
-  const bytes = crypto.getRandomValues(new Uint8Array(7));
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
-}
-
-/* The namespace comes from the server's short_url and is never constructed
-   here. The server assigns a truncated npub prefix, and only it knows which
-   length was allocated after any collision. */
-function adoptNamespace(shortUrl) {
-  try {
-    const u = new URL(shortUrl);
-    const ident = u.pathname.split("/").filter(Boolean)[0];
-    if (!ident) return;
-    state.namespace = ident;
-    ui.slugPrefix.textContent = `${u.host.replace(/:\d+$/, "")}/${ident}/`;
-  } catch { /* leave the neutral placeholder in place */ }
-}
-
 function neutralNamespace() {
   ui.slugPrefix.textContent = `${displayHost()}/`;
 }
@@ -256,7 +237,6 @@ function disconnect() {
   state.signerKind = null;
   state.pubkey = null;
   state.npub = null;
-  state.namespace = null;
   state.links = [];
   ui.identity.hidden = true;
   ui.signinGroup.hidden = false;
@@ -381,14 +361,62 @@ const PAYMENT_PENDING = "payment-pending";
  * Authorization header free for the L402 credential — the two used to collide
  * there. See docs/payments.md.
  */
-async function createLink(event) {
+/* Ask the server for a random slug to use on the cheap (auto) tier. The server
+   reserves it so the create can prove it was server-issued, not chosen. */
+async function fetchServerSlug() {
+  const nostrCred = await authHeader("POST", "/api/links/slug", "");
+  const res = await fetch("/api/links/slug", {
+    method: "POST",
+    headers: { "X-Nostr-Authorization": nostrCred },
+  });
+  if (!res.ok) throw new Error("Could not reserve a name — try again.");
+  const { slug } = await res.json();
+  if (!slug) throw new Error("Server returned no slug.");
+  return slug;
+}
+
+/* Is a custom name free? Best-effort UX only — the create is the real guard. */
+async function checkAvailable(slug) {
+  const res = await fetch(`/api/links/available?slug=${encodeURIComponent(slug)}`);
+  if (!res.ok) return null;
+  return res.json(); // { slug, available, reason? }
+}
+
+/* Reflect the price (100 auto / 500 custom) and, for a typed name, a debounced
+   availability hint. */
+let slugCheckTimer = null;
+function refreshSlugState() {
+  const custom = ui.slug.value.trim().toLowerCase();
+  ui.priceAmount.textContent = custom ? "500 sats" : "100 sats";
+
+  clearTimeout(slugCheckTimer);
+  if (!custom) { ui.slugHint.hidden = true; return; }
+
+  ui.slugHint.hidden = false;
+  ui.slugHint.className = "slug-hint";
+  ui.slugHint.textContent = "checking…";
+  slugCheckTimer = setTimeout(async () => {
+    const avail = await checkAvailable(custom);
+    if (ui.slug.value.trim().toLowerCase() !== custom) return; // input moved on
+    if (!avail) { ui.slugHint.hidden = true; return; }
+    if (avail.available) {
+      ui.slugHint.className = "slug-hint is-free";
+      ui.slugHint.textContent = "available";
+    } else {
+      ui.slugHint.className = "slug-hint is-taken";
+      ui.slugHint.textContent = avail.reason === "reserved" ? "reserved" : "taken";
+    }
+  }, 350);
+}
+
+async function createLink(event, path = "/api/links") {
   const body = JSON.stringify({ event });
-  const nostrCred = await authHeader("POST", "/api/links", body);
+  const nostrCred = await authHeader("POST", path, body);
 
   const post = (l402) => {
     const headers = { "Content-Type": "application/json", "X-Nostr-Authorization": nostrCred };
     if (l402) headers.Authorization = l402;
-    return fetch("/api/links", { method: "POST", headers, body });
+    return fetch(path, { method: "POST", headers, body });
   };
 
   let res = await post(null);
@@ -405,7 +433,7 @@ async function createLink(event) {
     // Always show the invoice — the QR leads. WebLN is offered as one option in
     // the panel, never forced ahead of showing the invoice. Everything needed
     // to complete (by extension, scan, or pasted preimage) is stashed here.
-    pendingPayment = { body, nostrCred, ...challenge, event };
+    pendingPayment = { body, nostrCred, path, ...challenge, event };
     showInvoice(res.headers.get("WWW-Authenticate"));
     throw new Error(PAYMENT_PENDING);
   }
@@ -445,14 +473,14 @@ async function payWithWebln(invoice) {
    field or a WebLN payment. */
 async function completePendingPayment(preimage) {
   if (!pendingPayment) return;
-  const { body, macaroon, event } = pendingPayment;
+  const { body, macaroon, event, path } = pendingPayment;
 
   // Re-sign NIP-98 fresh. The original was signed when Shorten was clicked, and
   // paying can take minutes — long enough for that signature to age out of the
   // ±60s window and be rejected by the app. A new one authorizes this retry.
-  const nostrCred = await authHeader("POST", "/api/links", body);
+  const nostrCred = await authHeader("POST", path, body);
 
-  const res = await fetch("/api/links", {
+  const res = await fetch(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -466,7 +494,7 @@ async function completePendingPayment(preimage) {
     pendingPayment = null;
     ui.invoice.hidden = true;
 
-    window.sqzTrack?.("payment_completed", { amount_sats: 10 });
+    window.sqzTrack?.("payment_completed", { amount_sats: path === "/api/links/custom" ? 500 : 100 });
 
     const data = await res.json().catch(() => ({}));
     const destination = event.tags.find((t) => t[0] === "r")?.[1] || "";
@@ -500,7 +528,6 @@ async function loadLinks() {
 
     const { links = [] } = await res.json();
     state.links = links;
-    if (links.length) adoptNamespace(links[0].short_url);
     renderLinks(links);
   } catch {
     // A failed listing must never block creating a link.
@@ -516,6 +543,10 @@ function showInvoice(wwwAuthenticate) {
   const invoice = match[1];
   ui.invoiceCode.textContent = invoice;
   ui.invoiceOpen.href = `lightning:${invoice}`;
+
+  // Mirror the tier's price (100 auto / 500 custom) into the invoice heading.
+  const amountEl = document.querySelector(".invoice-amount");
+  if (amountEl) amountEl.textContent = ui.priceAmount.textContent;
 
   // Rendered server-side so the page keeps shipping no third-party code.
   // Hidden until it actually loads: a broken image icon where a payment code
@@ -597,7 +628,7 @@ async function revokeLink(slug, row, button) {
 
   try {
     const event = await signLinkEvent(slug, "", "");
-    await createLink(event);
+    await createLink(event, "/api/links");
 
     // Let the row leave before the list redraws, so the change is legible.
     row.classList.add("is-leaving");
@@ -645,6 +676,7 @@ function measureInput() {
 /* ----------------------------------------------------------------- events */
 
 ui.url.addEventListener("input", measureInput);
+ui.slug.addEventListener("input", refreshSlugState);
 
 /* Paste can land a beat before the input event fires in some browsers; this
    keeps the meter in step with what the user just did. */
@@ -697,20 +729,35 @@ ui.form.addEventListener("submit", async (e) => {
     return;
   }
 
-  const slug = (ui.slug.value.trim() || autoSlug()).toLowerCase();
+  const custom = ui.slug.value.trim().toLowerCase();
+  // A typed name is a custom link (500 sats); a blank one gets a server-issued
+  // slug at the auto price (100 sats). The endpoint sets the price.
+  const path = custom ? "/api/links/custom" : "/api/links";
+
+  // The paywall charges before sqzd sees the request, so a taken custom name
+  // would bill 500 sats and then 409. Check first. (The claim at create time is
+  // still the real guard against a race between here and payment.)
+  if (custom) {
+    const avail = await checkAvailable(custom);
+    if (avail && !avail.available) {
+      say(avail.reason === "reserved" ? "That name is reserved — pick another." : `"${custom}" is taken — pick another.`, "error");
+      ui.slug.focus();
+      return;
+    }
+  }
 
   // The wait is the signature — an extension prompt, or a fast local sign.
   setWaiting(true, state.signerKind === "extension" ? "Waiting for your extension" : "Signing");
 
   try {
+    const slug = custom || (await fetchServerSlug());
     const event = await signLinkEvent(slug, destination, "");
     setWaiting(true, "Publishing");
 
-    const data = await createLink(event);
-    if (data.short_url) adoptNamespace(data.short_url);
-
+    const data = await createLink(event, path);
     showResult(destination, data.short_url);
     ui.slug.value = "";
+    refreshSlugState();
     await loadLinks();
   } catch (err) {
     if (err.message !== PAYMENT_PENDING) {

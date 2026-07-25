@@ -303,6 +303,10 @@ input:focus {
 .prefixed input { border: 0; background: none; padding-left: 0; border-radius: 0; flex: 1 1 auto; min-width: 5ch; }
 .prefixed input:focus { box-shadow: none; background: none; }
 
+.slug-hint { display: block; margin-top: 6px; font-size: 12px; font-weight: 560; letter-spacing: -.01em; color: var(--ink-3); }
+.slug-hint.is-free { color: var(--success); }
+.slug-hint.is-taken { color: var(--danger); }
+
 /* -------------------------------------------------------------- buttons */
 
 .btn {

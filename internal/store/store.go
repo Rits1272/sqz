@@ -70,6 +70,13 @@ func nameKey(name string) string {
 	return derivedPrefix + "name:" + name
 }
 
+// slugOwnerKey maps a global slug to the pubkey that owns it. Unlike linkKey
+// (per-identity), this is the one authority that makes a flat sqzit.in/<slug>
+// resolve to a single link.
+func slugOwnerKey(slug string) string {
+	return derivedPrefix + "slug:" + slug
+}
+
 // storedLink is the on-disk shape of a link. It is deliberately a separate
 // type from links.Link: this is a cache format we control and may change,
 // whereas links.Link mirrors what the relay event says.
@@ -356,6 +363,66 @@ func (s *Store) SeenBefore(ctx context.Context, id string, ttl time.Duration) (b
 		return false, fmt.Errorf("store: replay guard: %w", err)
 	}
 	return !ok, nil
+}
+
+// IssueSlug reserves a server-generated slug for a pubkey to claim on a
+// subsequent create. The short TTL means an unclaimed reservation expires
+// rather than pinning the name forever.
+func (s *Store) IssueSlug(ctx context.Context, pubkey, slug string, ttl time.Duration) error {
+	return s.rdb.Set(ctx, localPrefix+"issued:"+pubkey+":"+slug, 1, ttl).Err()
+}
+
+// ClaimIssuedSlug consumes a slug this server issued to pubkey. It returns true
+// only if the slug was outstanding — so a caller cannot pass off a self-chosen
+// slug as a server-issued one. Del is atomic, so a slug is claimed at most once.
+func (s *Store) ClaimIssuedSlug(ctx context.Context, pubkey, slug string) (bool, error) {
+	n, err := s.rdb.Del(ctx, localPrefix+"issued:"+pubkey+":"+slug).Result()
+	if err != nil {
+		return false, fmt.Errorf("store: claim issued slug: %w", err)
+	}
+	return n == 1, nil
+}
+
+// ClaimSlugOwner records pubkey as the global owner of slug. It returns true if
+// the slug is now owned by pubkey — either freshly claimed, or already theirs
+// (so re-publishing your own link succeeds). It returns false only when another
+// key already owns it. SetNX makes the first claim atomic under contention.
+func (s *Store) ClaimSlugOwner(ctx context.Context, slug, pubkey string) (bool, error) {
+	ok, err := s.rdb.SetNX(ctx, slugOwnerKey(slug), pubkey, 0).Result()
+	if err != nil {
+		return false, fmt.Errorf("store: claim slug owner: %w", err)
+	}
+	if ok {
+		return true, nil
+	}
+	owner, err := s.rdb.Get(ctx, slugOwnerKey(slug)).Result()
+	if err != nil {
+		return false, fmt.Errorf("store: read slug owner: %w", err)
+	}
+	return owner == pubkey, nil
+}
+
+// SlugOwner returns the pubkey that owns slug, or ErrNotFound if it is free.
+func (s *Store) SlugOwner(ctx context.Context, slug string) (string, error) {
+	owner, err := s.rdb.Get(ctx, slugOwnerKey(slug)).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: slug owner: %w", err)
+	}
+	return owner, nil
+}
+
+// SlugTaken reports whether a slug is already owned. Exact and O(1) — the
+// authority behind the availability check; the ClaimSlugOwner at create time
+// remains the real guard against a race between check and claim.
+func (s *Store) SlugTaken(ctx context.Context, slug string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, slugOwnerKey(slug)).Result()
+	if err != nil {
+		return false, fmt.Errorf("store: slug taken: %w", err)
+	}
+	return n == 1, nil
 }
 
 // RecordClick increments a link's click counter.
