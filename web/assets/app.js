@@ -27,12 +27,14 @@ const ui = {
   signout: el("signout"), keyBadge: el("key-badge"), backupBtn: el("backup-btn"),
   keyModal: el("keymodal"), keyModalTitle: el("keymodal-title"),
   keyModalBackup: el("keymodal-backup"), keyModalImport: el("keymodal-import"),
-  nsecOut: el("nsec-out"), nsecCopy: el("nsec-copy"), backupDone: el("backup-done"),
+  nsecOut: el("nsec-out"), nsecCopy: el("nsec-copy"), nsecReveal: el("nsec-reveal"),
+  backupDone: el("backup-done"),
   keyForget: el("key-forget"),
   nsecIn: el("nsec-in"), importSubmit: el("import-submit"), keyModalClose: el("keymodal-close"),
   identity: el("identity"), identityKey: el("identity-key"),
   form: el("form"), url: el("url"), slug: el("slug"), slugPrefix: el("slug-prefix"),
   slugHint: el("slug-hint"), priceAmount: el("price-amount"),
+  customPrice: el("custom-price"),
   squeeze: el("squeeze"), btnLabel: el("btn-label"), btnMeta: el("btn-meta"),
   meter: el("meter"), meterFill: el("meter-fill"), meterVal: el("meter-val"),
   urlHost: el("url-host"),
@@ -61,11 +63,19 @@ const state = {
   signer: null,      // active signer (extension or browser key)
   signerKind: null,  // "extension" | "local"
   links: [],
+  priceSats: 100,   // the tier the composer is currently priced at
 };
 
 /* A link awaiting manual payment: the request is fully signed and the invoice
    is on screen, waiting only for a preimage to complete. */
 let pendingPayment = null;
+
+/* What the pending payment is actually buying. Creating a link and destroying
+   one both post to /api/links and both get charged, but they are opposite
+   pieces of news — without this the payment panel offers to "publish" a link
+   the user is paying to remove, and the receipt afterwards calls a dead link
+   Live. Shape: { kind: "create" | "revoke", slug }. */
+let pendingIntent = { kind: "create" };
 
 /* ------------------------------------------------------------------ util */
 
@@ -116,6 +126,74 @@ function neutralNamespace() {
    not a socket address. */
 function displayHost() {
   return state.domain.replace(/:\d+$/, "");
+}
+
+/* -------------------------------------------------------- payment recovery
+ *
+ * The mobile happy path is "tap Open in wallet → pay → come back", and that
+ * hands the browser to another app. If the tab is reclaimed — routine on iOS
+ * and Android — an in-memory pendingPayment took the macaroon, the invoice and
+ * the signed event with it. The user had paid, and there was no route back to
+ * what they bought.
+ *
+ * The macaroon has no expiry (l402_macaroon_timeout 0), so the credential is
+ * still good; only the handle was being thrown away. sessionStorage keeps it
+ * for the life of the tab.
+ */
+const STASH_KEY = "sqz:pending-payment";
+
+function stashPayment() {
+  if (!pendingPayment) return;
+  try {
+    sessionStorage.setItem(STASH_KEY, JSON.stringify({ payment: pendingPayment, intent: pendingIntent }));
+  } catch { /* private mode or full — recovery is best-effort */ }
+}
+
+function clearStash() {
+  try { sessionStorage.removeItem(STASH_KEY); } catch { /* nothing to undo */ }
+}
+
+/* Restore an unfinished payment on boot and say so plainly, because the user
+   may well have already paid for it. */
+function restorePayment() {
+  let saved;
+  try { saved = JSON.parse(sessionStorage.getItem(STASH_KEY) || "null"); } catch { return; }
+  if (!saved?.payment?.invoice) return;
+
+  pendingPayment = saved.payment;
+  pendingIntent = saved.intent || { kind: "create" };
+  showInvoice(`invoice="${saved.payment.invoice}" macaroon="${saved.payment.macaroon}"`);
+  say("You have an unfinished invoice from earlier in this tab. If you already paid it, paste the preimage below to claim it.", "note");
+  if (ui.invoiceManual) ui.invoiceManual.open = true;
+}
+
+/* ------------------------------------------------------------------ price */
+
+/* "100 sats" is the price of the product in a unit almost no first-time
+   visitor can convert, and an unknown price is a reason to close the tab.
+ *
+ * The rate is a constant rather than a third-party request: this page ships no
+ * external code by design, and a figure that is roughly right does far more
+ * work than an exact one nobody can read. /api/config may override it, so the
+ * server can keep it current without a redeploy of this file. */
+const SATS_PER_BTC = 100_000_000;
+let usdPerBtc = 100_000; // Approximate by construction — hence the "≈" on screen.
+
+function fiatFor(sats) {
+  const usd = (sats / SATS_PER_BTC) * usdPerBtc;
+  if (!Number.isFinite(usd) || usd <= 0) return "";
+  if (usd < 0.01) return "<1¢";
+  if (usd < 1) return `${Math.round(usd * 100)}¢`;
+  return `$${usd.toFixed(2)}`;
+}
+
+/* Render a price into a node. Takes the sat figure as a number rather than
+   re-reading the node, so calling it twice can't compound "100 sats ≈ 10¢"
+   into nonsense. */
+function setPrice(node, sats) {
+  if (!node) return;
+  const fiat = fiatFor(sats);
+  node.textContent = fiat ? `${sats} sats ≈ ${fiat}` : `${sats} sats`;
 }
 
 /* -------------------------------------------------------- microinteraction */
@@ -289,7 +367,7 @@ async function connectExtension() {
       link("https://getalby.com", "Alby"),
       document.createTextNode(" or "),
       link("https://github.com/fiatjaf/nos2x", "nos2x"),
-      document.createTextNode(" and reload — or use a browser key instead. sqz never sees your private key."),
+      document.createTextNode(" and reload — or tap “Create a key” instead. sqz never sees your private key."),
     );
     return false;
   }
@@ -365,6 +443,52 @@ function localKeyReady() {
 
 /* The key modal has two modes: "backup" reveals the nsec to save (this is the
    only place a private key is ever shown), "import" restores one from an nsec. */
+/* ------------------------------------------------------------ modal focus
+ *
+ * Both dialogs declared aria-modal="true" while letting Tab walk straight out
+ * into the page behind them — with, in the backup dialog's case, a private key
+ * on screen. Declaring aria-modal and not honouring it is worse than not
+ * declaring it: assistive tech hides the background content while the DOM
+ * still hands focus to it.
+ */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+let trapped = null;        // the dialog currently holding focus
+let returnFocusTo = null;  // what to give it back to
+
+function trapFocus(modal) {
+  trapped = modal;
+  returnFocusTo = document.activeElement;
+  // Background is inert as far as both pointer and assistive tech go.
+  for (const node of [el("main-content") || document.querySelector("main"),
+                      document.querySelector("header.nav"),
+                      document.querySelector("footer.foot")]) {
+    if (node) { node.inert = true; node.setAttribute("aria-hidden", "true"); }
+  }
+}
+
+function releaseFocus() {
+  for (const node of [el("main-content") || document.querySelector("main"),
+                      document.querySelector("header.nav"),
+                      document.querySelector("footer.foot")]) {
+    if (node) { node.inert = false; node.removeAttribute("aria-hidden"); }
+  }
+  trapped = null;
+  // Send focus back where it came from, so a keyboard user isn't dumped at the
+  // top of the document.
+  if (returnFocusTo && document.contains(returnFocusTo)) returnFocusTo.focus();
+  returnFocusTo = null;
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab" || !trapped || trapped.hidden) return;
+  const items = [...trapped.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
 function showKeyModal(mode, nsec) {
   const backup = mode === "backup";
   ui.keyModalTitle.textContent = backup ? "Back up your key" : "Import a key";
@@ -372,16 +496,23 @@ function showKeyModal(mode, nsec) {
   ui.keyModalImport.hidden = backup;
   if (backup) {
     ui.nsecOut.textContent = nsec || "";
+    ui.nsecOut.classList.add("is-masked");
+    if (ui.nsecReveal) {
+      ui.nsecReveal.textContent = "Reveal";
+      ui.nsecReveal.setAttribute("aria-pressed", "false");
+    }
     ui.keyForget.hidden = !(window.sqzLocalKey && window.sqzLocalKey.exists());
   } else {
     ui.nsecIn.value = "";
   }
   ui.keyModal.hidden = false;
+  trapFocus(ui.keyModal);
   (backup ? ui.backupDone : ui.nsecIn).focus();
 }
 
 function hideKeyModal() {
   ui.keyModal.hidden = true;
+  releaseFocus();
   ui.nsecOut.textContent = "";
   ui.nsecIn.value = "";
 }
@@ -493,7 +624,8 @@ async function checkAvailable(slug) {
 let slugCheckTimer = null;
 function refreshSlugState() {
   const custom = ui.slug.value.trim().toLowerCase();
-  ui.priceAmount.textContent = custom ? "500 sats" : "100 sats";
+  state.priceSats = custom ? 500 : 100;
+  setPrice(ui.priceAmount, state.priceSats);
 
   clearTimeout(slugCheckTimer);
   if (!custom) { ui.slugHint.hidden = true; return; }
@@ -540,6 +672,7 @@ async function createLink(event, path = "/api/links") {
     // the panel, never forced ahead of showing the invoice. Everything needed
     // to complete (by extension, scan, or pasted preimage) is stashed here.
     pendingPayment = { body, nostrCred, path, ...challenge, event };
+    stashPayment();
     showInvoice(res.headers.get("WWW-Authenticate"));
     throw new Error(PAYMENT_PENDING);
   }
@@ -547,6 +680,7 @@ async function createLink(event, path = "/api/links") {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   pendingPayment = null;
+  clearStash();
   return data;
 }
 
@@ -599,6 +733,7 @@ async function completePendingPayment(preimage) {
 
   if (res.ok) {
     pendingPayment = null;
+    clearStash();
 
     window.sqzTrack?.("payment_completed", { amount_sats: path === "/api/links/custom" ? 500 : 100 });
 
@@ -609,6 +744,17 @@ async function completePendingPayment(preimage) {
     // Sequenced, not simultaneous: settling the invoice and revealing the link
     // are two different pieces of news.
     await settleInvoice();
+
+    // A revocation has no result to celebrate. Routing it through showResult
+    // rendered the link the user just destroyed with a live badge, a "Ready"
+    // ratio and a Copy button.
+    if (pendingIntent.kind === "revoke") {
+      say(`Revoked /${pendingIntent.slug}. It no longer resolves.`, "good");
+      pendingIntent = { kind: "create" };
+      await loadLinks();
+      return;
+    }
+
     showResult(destination, data.short_url);
     await loadLinks();
     return;
@@ -817,6 +963,8 @@ function renderAnalytics(data) {
   }
 
   ui.analyticsModal.hidden = false;
+  trapFocus(ui.analyticsModal);
+  ui.analyticsClose?.focus();
 }
 
 function showInvoice(wwwAuthenticate) {
@@ -830,8 +978,24 @@ function showInvoice(wwwAuthenticate) {
   ui.invoiceOpen.href = `lightning:${invoice}`;
 
   // Mirror the tier's price (100 auto / 500 custom) into the invoice heading.
-  const amountEl = document.querySelector(".invoice-amount");
-  if (amountEl) amountEl.textContent = ui.priceAmount.textContent;
+  // Revoking is always the base rate — it posts to /api/links, not the custom
+  // endpoint — so it must not inherit a 500-sat label from a typed name.
+  const revoking = pendingIntent.kind === "revoke";
+  setPrice(document.querySelector(".invoice-amount"), revoking ? 100 : state.priceSats);
+
+  // The panel says what the money is actually for. Offering to "publish" a
+  // link the user is paying to destroy is how you lose someone's trust at the
+  // exact moment you are taking their money.
+  const titleEl = el("invoice-title");
+  if (titleEl?.firstChild?.nodeType === Node.TEXT_NODE) {
+    titleEl.firstChild.textContent = revoking ? "Pay to revoke " : "Scan to pay ";
+  }
+  const leadEl = el("invoice-lead");
+  if (leadEl) {
+    leadEl.textContent = revoking
+      ? `Point any Lightning wallet at the code below. /${pendingIntent.slug} stops resolving the moment this is paid.`
+      : "Point any Lightning wallet at the code below. Your link publishes the moment it's paid. Paying needs a Lightning wallet — not a nostr one.";
+  }
 
   // Rendered server-side so the page keeps shipping no third-party code.
   // Hidden until it actually loads: a broken image icon where a payment code
@@ -904,9 +1068,19 @@ function renderRow(link) {
   revoke.className = "row-act";
   revoke.type = "button";
   revoke.textContent = "Revoke";
-  revoke.addEventListener("click", () => revokeLink(link.slug, row, revoke));
+  // The primary verb on a saved link is "copy it again". Before this the only
+  // button on a row was the destructive one, and clicking the slug navigated
+  // away from the app.
+  const copy = document.createElement("button");
+  copy.className = "row-act row-copy";
+  copy.type = "button";
+  copy.innerHTML = '<span class="copy-label">Copy</span>';
+  wireCopy(copy, () => link.short_url, "Copy");
 
-  row.append(main, clicks, revoke);
+  revoke.addEventListener("click", () => armRevoke(revoke, link.slug, row));
+  revoke.addEventListener("blur", () => { if (revoke.dataset.armed) resetRevoke(revoke); });
+
+  row.append(main, clicks, copy, revoke);
   return row;
 }
 
@@ -915,6 +1089,10 @@ function renderRow(link) {
 async function revokeLink(slug, row, button) {
   button.disabled = true;
   button.textContent = "Revoking";
+  // Republishing an empty destination is still a create as far as the paywall
+  // is concerned, so it is charged at the base rate. Everything downstream —
+  // the invoice copy, the receipt — reads this to know what it is paying for.
+  pendingIntent = { kind: "revoke", slug };
 
   try {
     const event = await signLinkEvent(slug, "", "");
@@ -924,11 +1102,42 @@ async function revokeLink(slug, row, button) {
     row.classList.add("is-leaving");
     setTimeout(() => { loadLinks(); }, reduced() ? 0 : 320);
     say(`Revoked /${slug}. It no longer resolves.`, "good");
+    pendingIntent = { kind: "create" };
   } catch (err) {
     button.disabled = false;
-    button.textContent = "Revoke";
-    if (err.message !== PAYMENT_PENDING) say(err.message, "error");
+    resetRevoke(button);
+    // On PAYMENT_PENDING the invoice is up and pendingIntent must survive —
+    // it is what tells the receipt this was a revocation.
+    if (err.message !== PAYMENT_PENDING) {
+      pendingIntent = { kind: "create" };
+      say(err.message, "error");
+    }
   }
+}
+
+/* Revoke is destructive, irreversible and — because the paywall sits in front
+   of the app — costs 100 sats. It asks once, with the price on the button,
+   before any of that happens. */
+function armRevoke(button, slug, row) {
+  if (button.dataset.armed === "1") {
+    delete button.dataset.armed;
+    clearTimeout(Number(button.dataset.timer));
+    revokeLink(slug, row, button);
+    return;
+  }
+  button.dataset.armed = "1";
+  button.textContent = "Revoke · 100 sats?";
+  button.classList.add("is-armed");
+  // Disarm on its own, so a stray click doesn't leave a primed destructive
+  // control sitting in the list.
+  button.dataset.timer = String(setTimeout(() => resetRevoke(button), 4000));
+}
+
+function resetRevoke(button) {
+  delete button.dataset.armed;
+  clearTimeout(Number(button.dataset.timer));
+  button.classList.remove("is-armed");
+  button.textContent = "Revoke";
 }
 
 function showResult(destination, shortUrl) {
@@ -1174,16 +1383,43 @@ ui.backupDone.addEventListener("click", hideKeyModal);
 ui.keyModal.addEventListener("click", (e) => { if (e.target === ui.keyModal) hideKeyModal(); });
 
 ui.analyticsBtn.addEventListener("click", openAnalytics);
-ui.analyticsClose.addEventListener("click", () => { ui.analyticsModal.hidden = true; });
-ui.analyticsModal.addEventListener("click", (e) => { if (e.target === ui.analyticsModal) ui.analyticsModal.hidden = true; });
+const closeAnalytics = () => { ui.analyticsModal.hidden = true; releaseFocus(); };
+ui.analyticsClose.addEventListener("click", closeAnalytics);
+ui.analyticsModal.addEventListener("click", (e) => { if (e.target === ui.analyticsModal) closeAnalytics(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !ui.analyticsModal.hidden) closeAnalytics();
+});
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !ui.keyModal.hidden) hideKeyModal(); });
 wireCopy(ui.nsecCopy, () => ui.nsecOut.textContent, "Copy");
 
+/* Reveal is a deliberate act. Copy works either way, so the common path —
+   copy straight into a password manager — never puts the key on screen. */
+ui.nsecReveal?.addEventListener("click", () => {
+  const masked = ui.nsecOut.classList.toggle("is-masked");
+  ui.nsecReveal.textContent = masked ? "Reveal" : "Hide";
+  ui.nsecReveal.setAttribute("aria-pressed", masked ? "false" : "true");
+});
+
+/* Forgetting the key destroys control of every link it ever paid for. That is
+   the most expensive irreversible action on the page and it was one click,
+   sitting beside the key itself. It now asks, and says what is actually lost. */
 ui.keyForget.addEventListener("click", () => {
+  if (ui.keyForget.dataset.armed !== "1") {
+    ui.keyForget.dataset.armed = "1";
+    ui.keyForget.textContent = "Really forget? This can't be undone";
+    setTimeout(() => {
+      if (!ui.keyForget.dataset.armed) return;
+      delete ui.keyForget.dataset.armed;
+      ui.keyForget.textContent = "Forget this key";
+    }, 5000);
+    return;
+  }
+  delete ui.keyForget.dataset.armed;
+  ui.keyForget.textContent = "Forget this key";
   if (window.sqzLocalKey) window.sqzLocalKey.clear();
   hideKeyModal();
   disconnect();
-  say("Browser key forgotten. Its links can't be managed from here anymore.", "note");
+  say("Browser key forgotten. Without its backup you can no longer revoke or repoint any link you paid for with it.", "note");
 });
 
 ui.importSubmit.addEventListener("click", async () => {
@@ -1203,6 +1439,7 @@ ui.form.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearNotice();
   ui.invoice.hidden = true;
+  ui.result.hidden = true;
 
   // Enter submits without ever firing blur, so this is the last chance to tidy
   // the URL before it gets signed into an event and paid for.
@@ -1223,8 +1460,29 @@ ui.form.addEventListener("submit", async (e) => {
   // Signing in is an explicit choice now (extension vs browser key), so don't
   // silently pick one — point the user at the two options.
   if (!state.signer) {
-    say("Sign in first — connect a signer, or create a key in this browser.", "note");
-    ui.signinGroup.scrollIntoView({ behavior: reduced() ? "auto" : "smooth", block: "nearest" });
+    // Point at the choice where the intent is, rather than scroll-jumping to a
+    // nav that was already on screen. Most visitors have no nostr key, so the
+    // offer leads with making one.
+    const makeKey = document.createElement("button");
+    makeKey.type = "button";
+    makeKey.className = "linklike linklike-strong";
+    makeKey.textContent = "Create a key";
+    makeKey.addEventListener("click", () => { clearNotice(); connectLocal(); });
+
+    const useExt = document.createElement("button");
+    useExt.type = "button";
+    useExt.className = "linklike";
+    useExt.textContent = "use a nostr extension";
+    useExt.addEventListener("click", () => { clearNotice(); connectExtension(); });
+
+    sayNodes(
+      "note",
+      document.createTextNode("A link has to be signed before it can be paid for. "),
+      makeKey,
+      document.createTextNode(" — it takes a second and stays in this browser — or "),
+      useExt,
+      document.createTextNode("."),
+    );
     return;
   }
 
@@ -1247,6 +1505,9 @@ ui.form.addEventListener("submit", async (e) => {
       return;
     }
   }
+
+  // This submit is a create. Reset in case a revoke was abandoned mid-payment.
+  pendingIntent = { kind: "create" };
 
   // The wait is the signature — an extension prompt, or a fast local sign.
   setWaiting(true, state.signerKind === "extension" ? "Waiting for your extension" : "Signing");
@@ -1344,9 +1605,15 @@ ui.preimageSubmit.addEventListener("click", async () => {
   window.__sqzConfig = cfg;
   window.dispatchEvent(new CustomEvent("sqz:config-ready", { detail: cfg }));
 
+  // The server may carry a fresher rate than the constant compiled in here.
+  if (Number.isFinite(cfg?.usd_per_btc) && cfg.usd_per_btc > 0) usdPerBtc = cfg.usd_per_btc;
+  setPrice(ui.priceAmount, state.priceSats);
+  setPrice(ui.customPrice, 500);
+
   neutralNamespace();
   measureInput();
   trackPointer();
+  restorePayment();
   loadLeaderboard();
 
   // Reconnect to the signer used last time. Extension: only if it's present
@@ -1363,12 +1630,15 @@ ui.preimageSubmit.addEventListener("click", async () => {
   // URL, click Shorten, and only then learn they need one. The short delay lets
   // a slow-injecting extension register first.
   setTimeout(() => {
+    // Never talk over a recovered invoice. Someone who may already have paid
+    // needs to see how to claim it far more than they need an install pitch.
+    if (pendingPayment) return;
     if (!state.signer && !window.nostr) {
       sayNodes(
         "note",
         document.createTextNode("sqz signs each link with a nostr key before you pay. Install "),
         link("https://getalby.com", "Alby"),
-        document.createTextNode(" to use your own — or just tap “Create key” to make one in this browser."),
+        document.createTextNode(" to use your own — or just tap “Create a key” to make one in this browser."),
       );
     }
   }, 900);

@@ -45,7 +45,7 @@ var (
 	ErrNotSqzLink    = errors.New("links: 'd' tag is not a sqz link")
 	ErrSlugEmpty     = errors.New("links: slug is empty")
 	ErrSlugTooLong   = fmt.Errorf("links: slug exceeds %d characters", MaxSlugLen)
-	ErrSlugCharset   = errors.New("links: slug may only contain letters, digits, '-', '_' and '.'")
+	ErrSlugCharset   = errors.New("links: slug may only contain lowercase letters, digits, '-', '_' and '.'")
 	ErrSlugReserved  = errors.New("links: slug is reserved")
 	ErrNoDestination = errors.New("links: missing 'r' tag")
 	ErrDestTooLong   = fmt.Errorf("links: destination exceeds %d characters", MaxDestinationLen)
@@ -57,11 +57,19 @@ var (
 )
 
 // reservedSlugs cannot be used because they would shadow sqz's own routes.
-// Slugs live in a per-identity namespace, so this is a routing concern rather
-// than a naming-rights one.
+//
+// Every path that nginx or the mux terminates before the redirect handler must
+// appear here. A slug that is accepted but never resolves is worse than one
+// that is refused: the paywall charges at the edge, so the user pays for a link
+// that can never work, and there is no refund path. TestReservedSlugsCoverEdge
+// pins this list against nginx.conf.
+//
+// Since the move to a flat global namespace this is a naming-rights concern as
+// well as a routing one — these names are unavailable to everybody.
 var reservedSlugs = map[string]bool{
 	"api": true, "admin": true, "static": true, "assets": true,
 	"favicon.ico": true, "robots.txt": true, "health": true,
+	"sitemap.xml": true, ".well-known": true,
 }
 
 // Link is a validated short link.
@@ -176,10 +184,20 @@ func ValidateSlug(slug string) error {
 	// Restricting the charset keeps slugs safe as a path segment without
 	// escaping, and rules out '/' and '%' which would otherwise let a slug
 	// forge extra path structure.
+	//
+	// Uppercase is rejected rather than folded. Slugs are claimed globally by
+	// exact bytes (store.ClaimSlugOwner), so accepting both cases would make
+	// "Google" and "google" separate permanent claims — a squatting surface in
+	// a namespace where names are contested and never expire. Folding instead
+	// is not an option: the global slug key would then disagree with the
+	// per-identity link key, which is built from the slug as the signer wrote
+	// it in the event's `d` tag, and serveRedirect looks up both.
+	//
+	// The web client already lowercases as you type, so this only constrains
+	// direct API callers.
 	for _, r := range slug {
 		switch {
 		case r >= 'a' && r <= 'z',
-			r >= 'A' && r <= 'Z',
 			r >= '0' && r <= '9',
 			r == '-', r == '_', r == '.':
 		default:

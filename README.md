@@ -34,8 +34,8 @@ sqz is a reader, not an owner.
 construction. sqz never has to decide who "gets" a name.
 
 **Paid in sats**, over Lightning, via the
-[ngx-l402](https://github.com/DhananjayPurohit/ngx_l402) nginx module. 10 sats
-per link.
+[ngx-l402](https://github.com/DhananjayPurohit/ngx_l402) nginx module. 100 sats
+per link, or 500 to choose the name yourself.
 
 ### So what am I actually paying for?
 
@@ -99,7 +99,7 @@ A few things that will bite you otherwise:
   production or the paywall is decorative.
 - **The module image is amd64-only**, so it runs under emulation on Apple
   Silicon. `platform: linux/amd64` is pinned in compose.
-- **Prices are in millisatoshis.** `l402_amount_msat_default 10000` is 10 sats.
+- **Prices are in millisatoshis.** `l402_amount_msat_default 100000` is 100 sats.
 - **`nginx.conf` is bind-mounted as a single file.** Editing it needs
   `docker compose up -d --force-recreate nginx`, or you'll keep serving the old
   config.
