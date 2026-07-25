@@ -86,17 +86,11 @@ services:
       - "traefik.http.routers.sqz-http.middlewares=sqz-https-redirect"
       - "traefik.http.middlewares.sqz-https-redirect.redirectscheme.scheme=https"
 
-      # --- non-canonical hosts: redirect to the canonical origin ------------
-      # www and any legacy hostname must not serve the app under a different
-      # origin — that would silently break every NIP-98 signature. They
-      # redirect to the canonical host, preserving the path so old links keep
-      # working.
-      #
-      # SQZ_LEGACY_HOST is the pre-domain hostname a deployment used to answer
-      # on (an IP-based sslip.io name, a staging host, …). It stays out of the
-      # repo and lives in .env. The default is a reserved .invalid name that
-      # can never resolve, so an unset value matches nothing.
-      - "traefik.http.routers.sqz-alias.rule=Host(`www.${SQZ_HOST:?}`) || Host(`${SQZ_LEGACY_HOST:-none.invalid}`)"
+      # --- www: redirect to the canonical origin ----------------------------
+      # www must not serve the app under a different origin — that would
+      # silently break every NIP-98 signature. It redirects to the canonical
+      # host, preserving the path.
+      - "traefik.http.routers.sqz-alias.rule=Host(`www.${SQZ_HOST:?}`)"
       - "traefik.http.routers.sqz-alias.entrypoints=http,https"
       - "traefik.http.routers.sqz-alias.tls=true"
       - "traefik.http.routers.sqz-alias.tls.certresolver=letsencrypt"
@@ -124,6 +118,14 @@ services:
       # Guards /admin/rebuild. Leaving it unset disables that endpoint
       # entirely rather than leaving it open — see server.Config.AdminToken.
       SQZ_ADMIN_TOKEN: ${SQZ_ADMIN_TOKEN:-}
+      # Public Firebase config from .env; unset API key disables analytics.
+      SQZ_FIREBASE_API_KEY: ${SQZ_FIREBASE_API_KEY:-}
+      SQZ_FIREBASE_AUTH_DOMAIN: ${SQZ_FIREBASE_AUTH_DOMAIN:-}
+      SQZ_FIREBASE_PROJECT_ID: ${SQZ_FIREBASE_PROJECT_ID:-}
+      SQZ_FIREBASE_STORAGE_BUCKET: ${SQZ_FIREBASE_STORAGE_BUCKET:-}
+      SQZ_FIREBASE_MESSAGING_SENDER_ID: ${SQZ_FIREBASE_MESSAGING_SENDER_ID:-}
+      SQZ_FIREBASE_APP_ID: ${SQZ_FIREBASE_APP_ID:-}
+      SQZ_FIREBASE_MEASUREMENT_ID: ${SQZ_FIREBASE_MEASUREMENT_ID:-}
     depends_on:
       redis:
         condition: service_healthy

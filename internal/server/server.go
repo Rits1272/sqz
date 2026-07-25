@@ -50,7 +50,25 @@ type Config struct {
 	// SelfHosts are hostnames belonging to sqz; link destinations pointing at
 	// them are rejected as redirect loops.
 	SelfHosts []string
+
+	// Firebase web-analytics config, served to the browser via /api/config.
+	// Zero value disables analytics.
+	Firebase FirebaseConfig
 }
+
+// FirebaseConfig is Firebase's public web config. The values are public
+// identifiers, not secrets; they reach the browser via /api/config.
+type FirebaseConfig struct {
+	APIKey            string `json:"apiKey,omitempty"`
+	AuthDomain        string `json:"authDomain,omitempty"`
+	ProjectID         string `json:"projectId,omitempty"`
+	StorageBucket     string `json:"storageBucket,omitempty"`
+	MessagingSenderID string `json:"messagingSenderId,omitempty"`
+	AppID             string `json:"appId,omitempty"`
+	MeasurementID     string `json:"measurementId,omitempty"`
+}
+
+func (f FirebaseConfig) Enabled() bool { return f.APIKey != "" }
 
 type Server struct {
 	cfg   Config
@@ -133,6 +151,9 @@ func (s *Server) handleRedirect(w http.ResponseWriter, r *http.Request) {
 			s.log.Warn("record click", "pubkey", pubkey, "slug", slug, "err", err)
 		}
 	}()
+
+	// Short links aren't content to index — only the landing page is.
+	w.Header().Set("X-Robots-Tag", "noindex")
 
 	// 302, deliberately not 301: browsers cache a 301 indefinitely, which would
 	// make destination edits invisible and silently stop counting clicks.
@@ -301,10 +322,14 @@ func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
 // sees may differ from the one the server verifies against, and a mismatch
 // silently fails every signature.
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"base_url": s.cfg.BaseURL,
 		"domain":   s.cfg.Domain,
-	})
+	}
+	if s.cfg.Firebase.Enabled() {
+		out["firebase"] = s.cfg.Firebase
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // nostrAuthHeader carries the NIP-98 credential.

@@ -5,6 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>sqz — short links you own</title>
 <meta name="description" content="Short links signed with your nostr key and paid in sats. sqz indexes your links; it cannot forge them or take them back.">
+<link rel="canonical" href="https://sqzit.in/">
+
+<!-- Open Graph / Twitter card. Absolute URLs — crawlers fetch these out of context. -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://sqzit.in/">
+<meta property="og:site_name" content="sqz">
+<meta property="og:title" content="sqz — short links you own">
+<meta property="og:description" content="Short links signed with your nostr key and paid in sats. sqz indexes your links; it cannot forge them or take them back.">
+<meta property="og:image" content="https://sqzit.in/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="sqz — short links you own">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="sqz — short links you own">
+<meta name="twitter:description" content="Short links signed with your nostr key and paid in sats.">
+<meta name="twitter:image" content="https://sqzit.in/assets/og.png">
+
+<meta name="theme-color" content="#0A0A0F">
+
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebApplication","name":"sqz","url":"https://sqzit.in/","applicationCategory":"UtilitiesApplication","operatingSystem":"Any","description":"Short links signed with your nostr key and paid in sats. sqz indexes your links; it cannot forge them or take them back."}
+</script>
+
 <link rel="stylesheet" href="/assets/style.css">
 <!-- Browser-key signer (optional path for users without an extension). ES module,
      so it loads deferred and announces itself; app.js waits for it when needed. -->
@@ -250,5 +274,37 @@
 </footer>
 
 <script src="/assets/app.js"></script>
+
+<!-- Firebase Analytics. Config comes from /api/config (stashed on
+     window.__sqzConfig by app.js), never hardcoded. Consent-gated and off by
+     default — the SDK is fetched only after opt-in, so nothing reaches Google
+     on a normal load. Delete this block to remove analytics; app.js only calls
+     the optional window.sqzTrack?.(). -->
+<script type="module">
+  // Opt in: localStorage.setItem("sqz:analytics-consent", "granted"). For
+  // opt-out-by-default, change === "granted" to !== "denied".
+  const CONSENT_KEY = "sqz:analytics-consent";
+
+  let started = false;
+  async function startAnalytics(cfg) {
+    if (started || !cfg?.firebase) return;
+    if (localStorage.getItem(CONSENT_KEY) !== "granted") return;
+    started = true;
+    try {
+      const { initializeApp } = await import("https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js");
+      const { getAnalytics, logEvent } = await import("https://www.gstatic.com/firebasejs/12.16.0/firebase-analytics.js");
+      const analytics = getAnalytics(initializeApp(cfg.firebase));
+      // Bridge so app.js can log events without importing the SDK; absent (no-op) until consent.
+      window.sqzTrack = (name, params) => {
+        try { logEvent(analytics, name, params); } catch (_) {}
+      };
+    } catch (_) {
+      started = false;
+    }
+  }
+
+  if (window.__sqzConfig !== undefined) startAnalytics(window.__sqzConfig);
+  else window.addEventListener("sqz:config-ready", (e) => startAnalytics(e.detail), { once: true });
+</script>
 </body>
 </html>

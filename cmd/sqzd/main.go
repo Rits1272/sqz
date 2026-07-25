@@ -49,6 +49,16 @@ func run(log *slog.Logger) error {
 		Domain:     env("SQZ_DOMAIN", "localhost"),
 		AdminToken: os.Getenv("SQZ_ADMIN_TOKEN"),
 		SelfHosts:  selfHosts(baseURL, env("SQZ_SELF_HOSTS", "")),
+		// Public Firebase config from .env; unset API key disables analytics.
+		Firebase: server.FirebaseConfig{
+			APIKey:            os.Getenv("SQZ_FIREBASE_API_KEY"),
+			AuthDomain:        os.Getenv("SQZ_FIREBASE_AUTH_DOMAIN"),
+			ProjectID:         os.Getenv("SQZ_FIREBASE_PROJECT_ID"),
+			StorageBucket:     os.Getenv("SQZ_FIREBASE_STORAGE_BUCKET"),
+			MessagingSenderID: os.Getenv("SQZ_FIREBASE_MESSAGING_SENDER_ID"),
+			AppID:             os.Getenv("SQZ_FIREBASE_APP_ID"),
+			MeasurementID:     os.Getenv("SQZ_FIREBASE_MEASUREMENT_ID"),
+		},
 	}
 
 	// SQZ_WEB_DIR serves the frontend from disk instead of the embedded copy,
