@@ -134,9 +134,10 @@ function displayHost() {
 /* -------------------------------------------------------- microinteraction */
 
 /* Count up to the ratio. Small, but it makes the payoff feel earned rather
-   than simply printed. */
-function countUp(node, to, suffix, ms = 620) {
-  if (reduced()) { node.textContent = to.toFixed(1) + suffix; return; }
+   than simply printed. `done` fires once the number settles, so the landing
+   beat is attached to the count instead of guessed at with a timer. */
+function countUp(node, to, suffix, done, ms = 620) {
+  if (reduced()) { node.textContent = to.toFixed(1) + suffix; done?.(); return; }
 
   const from = 1;
   const start = performance.now();
@@ -145,8 +146,105 @@ function countUp(node, to, suffix, ms = 620) {
     const eased = 1 - Math.pow(1 - t, 3);
     node.textContent = (from + (to - from) * eased).toFixed(1) + suffix;
     if (t < 1) requestAnimationFrame(step);
+    else done?.();
   };
   requestAnimationFrame(step);
+}
+
+/* Restart a CSS animation that may already have run on this element. Removing
+   the class alone is not enough — the browser coalesces it with the re-add
+   unless a layout read forces the change to commit. */
+function replay(node, className) {
+  node.classList.remove(className);
+  void node.offsetWidth;
+  node.classList.add(className);
+}
+
+/* Sparks from the ratio. The one unreservedly celebratory thing on the page,
+   spent only on the moment a link actually exists. */
+function burst(anchor, host) {
+  if (reduced()) return;
+
+  const hostBox = host.getBoundingClientRect();
+  const box = anchor.getBoundingClientRect();
+  const sparks = document.createElement("div");
+  sparks.className = "sparks";
+  sparks.style.left = `${box.left - hostBox.left + box.width / 2}px`;
+  sparks.style.top = `${box.top - hostBox.top + box.height / 2}px`;
+
+  for (let i = 0; i < 12; i++) {
+    const dot = document.createElement("i");
+    dot.className = "spark";
+    const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.5;
+    const dist = 34 + Math.random() * 40;
+    dot.style.setProperty("--dx", `${Math.cos(angle) * dist}px`);
+    dot.style.setProperty("--dy", `${Math.sin(angle) * dist}px`);
+    dot.style.setProperty("--c", i % 3 === 0 ? "var(--amber)" : "var(--violet)");
+    dot.style.animationDelay = `${i * 8}ms`;
+    sparks.append(dot);
+  }
+
+  host.append(sparks);
+  setTimeout(() => sparks.remove(), 1000);
+}
+
+/* A short tap on phones that support it. Silent everywhere else, and never
+   used for anything the user didn't just do. */
+function tap(ms = 10) {
+  if (reduced()) return;
+  try { navigator.vibrate?.(ms); } catch { /* unsupported or blocked */ }
+}
+
+/* Ink from the point of contact. Delegated once, so it covers buttons that
+   don't exist yet (link rows, invoice actions) without any wiring. */
+document.addEventListener("pointerdown", (e) => {
+  if (reduced()) return;
+  const btn = e.target.closest?.(".btn");
+  if (!btn || btn.disabled) return;
+
+  const box = btn.getBoundingClientRect();
+  const size = Math.max(box.width, box.height) * 2.2;
+  const ink = document.createElement("span");
+  ink.className = "ripple";
+  ink.style.width = ink.style.height = `${size}px`;
+  ink.style.left = `${e.clientX - box.left}px`;
+  ink.style.top = `${e.clientY - box.top}px`;
+  ink.addEventListener("animationend", () => ink.remove(), { once: true });
+  btn.append(ink);
+});
+
+/* The pointer carries a light: the graph paper brightens under it, and so does
+   the primary action. Pointer-only — there is nothing here to miss on touch or
+   by keyboard — and written straight to custom properties, so the compositor
+   does the work and no layout is touched on move. */
+function trackPointer() {
+  if (reduced() || !window.matchMedia("(hover: hover)").matches) return;
+
+  const root = document.documentElement;
+  let x = 0, y = 0, queued = false;
+
+  const flush = () => {
+    queued = false;
+    root.style.setProperty("--mx", `${x}px`);
+    root.style.setProperty("--my", `${y}px`);
+
+    // The button wants the same point in its own coordinates.
+    const box = ui.squeeze.getBoundingClientRect();
+    ui.squeeze.style.setProperty("--bx", `${x - box.left}px`);
+    ui.squeeze.style.setProperty("--by", `${y - box.top}px`);
+  };
+
+  window.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "mouse") return;
+    x = e.clientX; y = e.clientY;
+    root.style.setProperty("--spot-on", "1");
+    if (!queued) { queued = true; requestAnimationFrame(flush); }
+  }, { passive: true });
+
+  // Light goes out when the cursor leaves the window, so a backgrounded tab
+  // isn't left with a stale glow sitting wherever the pointer last was.
+  root.addEventListener("pointerleave", () => root.style.setProperty("--spot-on", "0"));
+  window.addEventListener("blur", () => root.style.setProperty("--spot-on", "0"));
 }
 
 /* Copy confirms in place: the control becomes its own receipt, so no toast is
@@ -158,6 +256,7 @@ function wireCopy(button, getText, idleLabel) {
       await navigator.clipboard.writeText(getText());
       label.textContent = "Copied";
       button.classList.add("is-done");
+      tap();
       setTimeout(() => {
         label.textContent = idleLabel;
         button.classList.remove("is-done");
@@ -464,12 +563,16 @@ async function completePendingPayment(preimage) {
 
   if (res.ok) {
     pendingPayment = null;
-    ui.invoice.hidden = true;
 
     window.sqzTrack?.("payment_completed", { amount_sats: 10 });
 
     const data = await res.json().catch(() => ({}));
     const destination = event.tags.find((t) => t[0] === "r")?.[1] || "";
+
+    // Stamp the code paid and let the panel go before the result arrives.
+    // Sequenced, not simultaneous: settling the invoice and revealing the link
+    // are two different pieces of news.
+    await settleInvoice();
     showResult(destination, data.short_url);
     await loadLinks();
     return;
@@ -489,6 +592,38 @@ async function completePendingPayment(preimage) {
   }
   const data = await res.json().catch(() => ({}));
   throw new Error(data.error || `Could not publish the link (status ${res.status}).`);
+}
+
+/* Close out the invoice panel: stamp the QR paid, hold long enough to be read,
+   then collapse the panel away. Resolves once the panel is gone, so the caller
+   can reveal the link into the space it left. */
+function settleInvoice() {
+  if (ui.invoice.hidden) return Promise.resolve();
+
+  if (ui.qrStatus) ui.qrStatus.textContent = "Paid";
+  // "Scan to pay <span>10 sats</span>" → "Paid <span>10 sats</span>". Only the
+  // leading text node moves, so the gradient amount stays as it is.
+  const title = el("invoice-title");
+  if (title?.firstChild?.nodeType === Node.TEXT_NODE) title.firstChild.textContent = "Paid ";
+  ui.qr.classList.add("is-paid");
+  tap(18);
+
+  if (reduced()) {
+    ui.invoice.hidden = true;
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    // Hold on the seal, then let the panel leave.
+    setTimeout(() => {
+      ui.invoice.classList.add("is-leaving");
+      setTimeout(() => {
+        ui.invoice.hidden = true;
+        ui.invoice.classList.remove("is-leaving");
+        resolve();
+      }, 380);
+    }, 680);
+  });
 }
 
 async function loadLinks() {
@@ -531,6 +666,11 @@ function showInvoice(wwwAuthenticate) {
   ui.payWebln.disabled = false;
   ui.preimage.value = "";
   if (ui.qrStatus) ui.qrStatus.textContent = "Waiting for payment…";
+  // A previous invoice may have been settled in this session; this one has not.
+  ui.qr.classList.remove("is-paid");
+  ui.invoice.classList.remove("is-leaving");
+  const title = el("invoice-title");
+  if (title?.firstChild?.nodeType === Node.TEXT_NODE) title.firstChild.textContent = "Scan to pay ";
   ui.invoice.hidden = false;
   ui.invoice.scrollIntoView({ behavior: reduced() ? "auto" : "smooth", block: "nearest" });
 }
@@ -619,9 +759,16 @@ function showResult(destination, shortUrl) {
   ui.resultUrl.textContent = shortUrl.replace(/^https?:\/\//, "");
   ui.resultNote.textContent = `${before} characters in, ${after} out.`;
   ui.result.hidden = false;
+  replay(ui.result, "is-fresh");
+  tap(14);
 
   if (ratio > 1) {
-    countUp(ui.resultRatio, ratio, "× shorter");
+    // The number climbs, lands with a little weight, and throws sparks. Three
+    // beats on one event, because this is the event the whole page is for.
+    countUp(ui.resultRatio, ratio, "× shorter", () => {
+      replay(ui.resultRatio, "is-hit");
+      burst(ui.resultRatio, ui.result);
+    });
   } else {
     // Never dress a non-result up as a win.
     ui.resultRatio.textContent = "Ready";
@@ -640,6 +787,9 @@ function measureInput() {
 
   ui.meterVal.textContent = n;
   ui.meterFill.style.width = `${Math.min(100, (n / METER_REF) * 100)}%`;
+  // Past two thirds of the reference width the bar starts to glow: this is the
+  // kind of URL the product exists for.
+  ui.meter.classList.toggle("is-long", n / METER_REF > 0.66);
 }
 
 /* ----------------------------------------------------------------- events */
@@ -795,6 +945,7 @@ ui.preimageSubmit.addEventListener("click", async () => {
 
   neutralNamespace();
   measureInput();
+  trackPointer();
 
   // Reconnect to the signer used last time. Extension: only if it's present
   // (avoids errors). Browser key: only if one is actually stored.
