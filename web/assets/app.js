@@ -35,6 +35,7 @@ const ui = {
   slugHint: el("slug-hint"), priceAmount: el("price-amount"),
   squeeze: el("squeeze"), btnLabel: el("btn-label"), btnMeta: el("btn-meta"),
   meter: el("meter"), meterFill: el("meter-fill"), meterVal: el("meter-val"),
+  urlHost: el("url-host"),
   result: el("result"), resultUrl: el("result-url"),
   resultRatio: el("result-ratio"), resultNote: el("result-note"),
   copy: el("copy"), notice: el("notice"),
@@ -811,9 +812,101 @@ function showResult(destination, shortUrl) {
 
 /* ------------------------------------------------------------------ meter */
 
+/* ------------------------------------------------------------ field input
+ *
+ * Both fields are validated again on the server (internal/links/link.go), and
+ * that check is the authority. What happens here is only to stop a user
+ * reaching the paywall with input the server was always going to refuse —
+ * paying and *then* being told the scheme was missing is the worst failure
+ * this form can produce, and at 500 sats for a custom name it is not cheap.
+ */
+
+/* Something a browser would treat as a bare host: "example.com/a", but not
+   "hello world" and not a scheme we were never going to accept. */
+const BARE_HOST = /^[\w-]+(\.[\w-]+)+([/:?#]|$)/;
+
+/* Tidy a pasted URL. Wrapped lines from an email, a stray leading space, and
+   above all a missing scheme — which ValidateDestination rejects outright, and
+   which is the single most common way a paste fails. Anything already carrying
+   a scheme is left exactly as it is: silently rewriting "javascript:" into
+   https would turn a rejection into a working link nobody asked for. */
+function normalizeUrl(raw) {
+  const text = raw.replace(/[\r\n\t]+/g, "").trim();
+  if (!text) return "";
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return text;
+  return BARE_HOST.test(text) ? `https://${text}` : text;
+}
+
+/* Reduce a name to what ValidateSlug will accept: lowercase, [a-z0-9._-], with
+   whitespace becoming the hyphen the user almost certainly meant. Runs of
+   hyphens collapse, but a trailing one survives — stripping it mid-word would
+   make "my-link" impossible to type. */
+function sanitizeSlug(raw) {
+  return raw
+    .toLowerCase()
+    // Decompose accents and drop the combining marks, so "héllo" becomes
+    // "hello" rather than "hllo". Stripping a letter to nothing is the kind of
+    // silent mangling that makes a field feel hostile to anyone not typing
+    // English.
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+/* Rewrite the name field in place, keeping the caret where the user left it.
+   Assigning to .value alone would send it to the end on every keystroke. */
+function applySlugInput() {
+  const before = ui.slug.value;
+  const next = sanitizeSlug(before);
+  if (next === before) return;
+
+  const caret = ui.slug.selectionStart ?? before.length;
+  const head = sanitizeSlug(before.slice(0, caret)).length;
+  ui.slug.value = next;
+  const pos = Math.min(head, next.length);
+  ui.slug.setSelectionRange(pos, pos);
+}
+
+/* A URL pasted into the name field almost always means "use the end of this",
+   which is more useful than stripping it to an unreadable run of characters. */
+function slugFromPaste(text) {
+  const trimmed = text.trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return sanitizeSlug(trimmed);
+  try {
+    const seg = new URL(trimmed).pathname.split("/").filter(Boolean).pop();
+    // URL percent-encodes the path, and "%20" would otherwise survive
+    // sanitizing as a literal "20" glued into the middle of the name.
+    return sanitizeSlug(decodeURIComponent(seg || ""));
+  } catch {
+    return sanitizeSlug(trimmed);
+  }
+}
+
+/* Echo the host back. The input scrolls to the tail of a long URL, so without
+   this there is no way to confirm what was actually pasted. */
+function reflectUrlHost() {
+  const value = ui.url.value.trim();
+  let host = "";
+  try {
+    const u = new URL(value);
+    if (/^https?:$/i.test(u.protocol)) host = u.host;
+  } catch { /* not parseable yet — mid-type, or not a URL at all */ }
+
+  if (!host) { ui.urlHost.hidden = true; return; }
+
+  // A link back to sqz is refused by ValidateDestination as a redirect loop.
+  const self = host.replace(/:\d+$/, "").toLowerCase() === displayHost().toLowerCase();
+  ui.urlHost.textContent = self ? `${host} — that's sqz` : host;
+  ui.urlHost.dataset.kind = self ? "bad" : "ok";
+  ui.urlHost.hidden = false;
+}
+
 function measureInput() {
   const n = ui.url.value.trim().length;
   ui.meter.hidden = n === 0;
+  reflectUrlHost();
   if (!n) return;
 
   ui.meterVal.textContent = n;
@@ -826,11 +919,50 @@ function measureInput() {
 /* ----------------------------------------------------------------- events */
 
 ui.url.addEventListener("input", measureInput);
-ui.slug.addEventListener("input", refreshSlugState);
+
+/* Sanitize first, then let refreshSlugState price it and ask the server
+   whether it's free — it should be judging the name that will actually be
+   submitted, not the one with the spaces still in it. */
+ui.slug.addEventListener("input", () => { applySlugInput(); refreshSlugState(); });
 
 /* Paste can land a beat before the input event fires in some browsers; this
-   keeps the meter in step with what the user just did. */
-ui.url.addEventListener("paste", () => setTimeout(measureInput, 0));
+   keeps the meter in step with what the user just did — and is where a pasted
+   URL gets tidied, since that is the moment the whole value arrives at once. */
+ui.url.addEventListener("paste", () => setTimeout(() => {
+  const tidied = normalizeUrl(ui.url.value);
+  // Only touch the field if it actually changed, so a caret parked mid-URL
+  // after an ordinary paste isn't thrown to the end for nothing.
+  if (tidied !== ui.url.value) ui.url.value = tidied;
+  measureInput();
+}, 0));
+
+// Leaving the field is the other safe moment to tidy: the user has finished
+// with it, so moving the caret costs nothing.
+ui.url.addEventListener("blur", () => {
+  const tidied = normalizeUrl(ui.url.value);
+  if (tidied !== ui.url.value) { ui.url.value = tidied; measureInput(); }
+});
+
+ui.slug.addEventListener("paste", (e) => {
+  const text = e.clipboardData?.getData("text");
+  if (!text) return;
+  e.preventDefault();
+  const slug = slugFromPaste(text);
+  // Splice into whatever is selected, so pasting mid-name behaves normally.
+  const start = ui.slug.selectionStart ?? ui.slug.value.length;
+  const end = ui.slug.selectionEnd ?? start;
+  ui.slug.value = sanitizeSlug(ui.slug.value.slice(0, start) + slug + ui.slug.value.slice(end));
+  const pos = Math.min(start + slug.length, ui.slug.value.length);
+  ui.slug.setSelectionRange(pos, pos);
+  refreshSlugState();
+});
+
+// A hyphen is allowed to trail while typing; once the field is done, it isn't
+// part of the name.
+ui.slug.addEventListener("blur", () => {
+  const tidied = ui.slug.value.replace(/^-+|-+$/g, "");
+  if (tidied !== ui.slug.value) { ui.slug.value = tidied; refreshSlugState(); }
+});
 
 ui.signin.addEventListener("click", connectExtension);
 ui.signinLocal.addEventListener("click", connectLocal);
@@ -868,7 +1000,10 @@ ui.form.addEventListener("submit", async (e) => {
   clearNotice();
   ui.invoice.hidden = true;
 
-  const destination = ui.url.value.trim();
+  // Enter submits without ever firing blur, so this is the last chance to tidy
+  // the URL before it gets signed into an event and paid for.
+  const destination = normalizeUrl(ui.url.value);
+  if (destination !== ui.url.value) { ui.url.value = destination; measureInput(); }
   if (!destination) { ui.url.focus(); return; }
 
   // Signing in is an explicit choice now (extension vs browser key), so don't
@@ -879,7 +1014,10 @@ ui.form.addEventListener("submit", async (e) => {
     return;
   }
 
-  const custom = ui.slug.value.trim().toLowerCase();
+  // Sanitize here too: Enter can submit before blur has trimmed a trailing
+  // hyphen, and a 500-sat request is not the place to discover that.
+  const custom = sanitizeSlug(ui.slug.value).replace(/^-+|-+$/g, "");
+  if (custom !== ui.slug.value) ui.slug.value = custom;
   // A typed name is a custom link (500 sats); a blank one gets a server-issued
   // slug at the auto price (100 sats). The endpoint sets the price.
   const path = custom ? "/api/links/custom" : "/api/links";

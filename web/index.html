@@ -143,13 +143,20 @@
 
       <div class="field">
         <div class="field-top">
-          <label for="url">Paste a long URL</label>
+          <span class="field-lede">
+            <label for="url">Paste a long URL</label>
+            <!-- Echoes back the host actually parsed out of what was pasted, so
+                 a URL too long to read in the box can still be checked at a
+                 glance. Turns red if the link points back at sqz. -->
+            <span class="host-chip" id="url-host" hidden></span>
+          </span>
           <span class="meter" id="meter" hidden>
             <span class="meter-track" aria-hidden="true"><i class="meter-fill" id="meter-fill"></i></span>
             <span class="meter-val"><b id="meter-val">0</b> chars</span>
           </span>
         </div>
         <input id="url" name="url" type="url" inputmode="url" spellcheck="false"
+               autocapitalize="off" autocorrect="off"
                placeholder="https://example.com/a/very/long/address" required>
       </div>
 
@@ -158,7 +165,8 @@
           <label for="slug">Custom name <span class="opt">optional · 500 sats</span></label>
           <div class="prefixed">
             <span class="prefix" id="slug-prefix">sqzit.in/</span>
-            <input id="slug" name="slug" type="text" spellcheck="false" maxlength="64" placeholder="auto">
+            <input id="slug" name="slug" type="text" spellcheck="false" maxlength="64"
+                   autocapitalize="off" autocorrect="off" placeholder="auto">
           </div>
           <span class="slug-hint" id="slug-hint" hidden></span>
         </div>
@@ -277,7 +285,8 @@
       <li>
         <span class="step-n">02</span>
         <h3>You pay for it</h3>
-        <p>Ten sats over Lightning, once, per link. No account, no subscription, no card on file.</p>
+        <p>A hundred sats over Lightning, once, per link — five hundred to pick the name yourself.
+           No account, no subscription, no card on file.</p>
       </li>
       <li>
         <span class="step-n">03</span>
