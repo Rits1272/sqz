@@ -813,6 +813,24 @@ input:focus {
   animation: resultIn .28s var(--spring) both;
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+
+/* Analytics dashboard */
+.an-totals { display: flex; gap: 12px; margin-bottom: 16px; }
+.an-stat {
+  flex: 1 1 0; padding: 14px 16px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r);
+}
+.an-stat b { display: block; font-size: 26px; font-weight: 680; letter-spacing: -.02em; }
+.an-stat span { font-size: 12px; color: var(--ink-2); }
+.an-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.an-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border-radius: var(--r-sm);
+}
+.an-row:hover { background: var(--surface-2); }
+.an-slug { font-family: var(--mono); font-size: 13px; color: var(--ink); text-decoration: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.an-slug:hover { color: var(--violet); }
+.an-clicks { font-size: 12px; font-weight: 560; color: var(--ink-2); white-space: nowrap; }
 .modal-head h2 { margin: 0; font-size: 17px; font-weight: 640; letter-spacing: -.02em; }
 .modal-close {
   border: 0; background: none; cursor: pointer;

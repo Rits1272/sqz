@@ -84,6 +84,7 @@
       <span class="account-key" id="identity-key"></span>
       <span id="key-badge" class="key-badge" hidden title="This key is stored in your browser">browser key</span>
       <button id="backup-btn" class="account-out" type="button" hidden>Back up</button>
+      <button id="analytics-btn" class="account-out" type="button">Analytics</button>
       <button id="signout" class="account-out" type="button">Sign out</button>
     </div>
   </div>
@@ -124,6 +125,25 @@
         </button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Paid analytics dashboard: an aggregate view over your links' clicks,
+     unlocked once for 100 sats. -->
+<div id="analytics-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="analytics-title">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="analytics-title">Analytics</h2>
+      <button id="analytics-close" class="modal-close" type="button" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="an-totals">
+      <div class="an-stat"><b id="an-clicks">0</b><span>total clicks</span></div>
+      <div class="an-stat"><b id="an-links">0</b><span>links</span></div>
+    </div>
+
+    <div id="an-list" class="an-list"></div>
+    <p id="an-empty" class="modal-note" hidden>No links yet — create one and its clicks show up here.</p>
   </div>
 </div>
 
