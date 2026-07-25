@@ -46,7 +46,12 @@ jobs:
           # a new inode, but the running container still holds the old one, so an
           # in-place `nginx -s reload` reads stale config. Validate the NEW file
           # in a throwaway container, then force-recreate so the mount re-resolves.
-          if ! docker compose run --rm --no-deps -T nginx nginx -t; then
+          #
+          # `</dev/null` is load-bearing: this whole script is piped to `bash -s`
+          # over stdin, and `docker compose run` reads stdin — without this it
+          # swallows the rest of the script (the force-recreate and health check),
+          # so the deploy exits 0 having silently skipped both.
+          if ! docker compose run --rm --no-deps -T nginx nginx -t </dev/null; then
             echo "::error::nginx config invalid — not recreating"
             exit 1
           fi
