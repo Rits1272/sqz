@@ -340,6 +340,11 @@ func (s *Server) createLink(w http.ResponseWriter, r *http.Request, requireIssue
 		s.log.Warn("set public", "slug", link.Slug, "err", err) // non-fatal
 	}
 
+	// Remember the author so the reconciler can replay their links from relays.
+	if err := s.store.RecordAuthor(r.Context(), auth.PubKey); err != nil {
+		s.log.Warn("record author", "err", err) // non-fatal
+	}
+
 	// Publish the signed event to relays so the link lives somewhere sqz does
 	// not own. Best-effort and off the response path — a down relay must never
 	// fail a create. Revocations publish too, so they propagate the same way.
@@ -630,10 +635,74 @@ func (s *Server) handleNIP05(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleRebuild drops the derived keyspace so it can be replayed from relays.
-//
-// TODO: trigger the relay replay once the reconciler exists. Right now this
-// only clears, which leaves the index empty until links are re-submitted.
+// reindex re-applies one signed event to the derived index, as if it had just
+// been created — but without the paywall or issued-slug check, since it's
+// already a real link. Replayed in created_at order, the oldest event claiming
+// a slug wins, matching create-time first-come. Non-sqz events are a no-op.
+func (s *Server) reindex(ctx context.Context, evt *nostr.Event) error {
+	if ok, err := evt.CheckSignature(); err != nil || !ok {
+		return fmt.Errorf("signature check failed")
+	}
+	link, err := links.Parse(evt, s.cfg.SelfHosts)
+	if errors.Is(err, links.ErrWrongKind) || errors.Is(err, links.ErrNotSqzLink) {
+		return nil // not one of ours
+	}
+	if err != nil {
+		return err
+	}
+	if !link.Revoked {
+		owned, err := s.store.ClaimSlugOwner(ctx, link.Slug, evt.PubKey)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return nil // slug already claimed by an earlier event
+		}
+	}
+	if err := s.store.PutLink(ctx, link); err != nil {
+		return err
+	}
+	if err := s.store.SetPublic(ctx, link.Slug, link.Public && !link.Revoked); err != nil {
+		return err
+	}
+	return s.store.RecordAuthor(ctx, evt.PubKey)
+}
+
+// reconcile rebuilds the derived index from relay state: it fetches every sqz
+// link event authored by a known author and replays them oldest-first. The
+// author set lives in the backed-up local keyspace, so the derived index is a
+// rebuildable cache rather than the source of truth — the guarantee behind
+// "your links live on relays, not with sqz".
+func (s *Server) reconcile(ctx context.Context) (int, error) {
+	if s.publisher == nil {
+		return 0, nil // no relays configured — flush-only rebuild
+	}
+	authors, err := s.store.Authors(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if len(authors) == 0 {
+		return 0, nil
+	}
+
+	events := s.publisher.Fetch(ctx, nostr.Filter{Kinds: []int{links.Kind}, Authors: authors})
+	// Oldest-first so a contested slug goes to whoever claimed it first.
+	sort.Slice(events, func(i, j int) bool { return events[i].CreatedAt < events[j].CreatedAt })
+
+	indexed := 0
+	for i := range events {
+		if err := s.reindex(ctx, &events[i]); err != nil {
+			s.log.Warn("reindex", "id", events[i].ID, "err", err)
+			continue
+		}
+		indexed++
+	}
+	return indexed, nil
+}
+
+// handleRebuild flushes the derived keyspace and replays it from relays, so a
+// rebuild reconstructs the index from the events themselves rather than
+// starting empty.
 func (s *Server) handleRebuild(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeAdmin(r) {
 		// 404 rather than 401: an unauthenticated caller learns nothing about
@@ -649,7 +718,19 @@ func (s *Server) handleRebuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Warn("derived keyspace flushed", "deleted", deleted)
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+
+	// Replay from relays. Give it its own timeout — fetching from cold relays
+	// can be slow, and a rebuild shouldn't ride the request's deadline.
+	rctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	indexed, err := s.reconcile(rctx)
+	if err != nil {
+		s.log.Error("reconcile", "err", err)
+		writeError(w, http.StatusInternalServerError, "flushed but replay failed")
+		return
+	}
+	s.log.Info("reconciled from relays", "indexed", indexed)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted, "indexed": indexed})
 }
 
 // authorizeAdmin checks the operator bearer token.

@@ -426,6 +426,18 @@ func (s *Store) SlugTaken(ctx context.Context, slug string) (bool, error) {
 	return n == 1, nil
 }
 
+// RecordAuthor remembers a pubkey that has created a link. Kept in the LOCAL
+// keyspace so it survives a derived-index flush — it's the seed the reconciler
+// replays from when rebuilding the index from relays.
+func (s *Store) RecordAuthor(ctx context.Context, pubkey string) error {
+	return s.rdb.SAdd(ctx, localPrefix+"authors", pubkey).Err()
+}
+
+// Authors returns every pubkey that has created a link.
+func (s *Store) Authors(ctx context.Context) ([]string, error) {
+	return s.rdb.SMembers(ctx, localPrefix+"authors").Result()
+}
+
 // SetPublic opts a slug in or out of the public leaderboard. Opt-in, so a link
 // is only ever globally surfaced because its owner chose to.
 func (s *Store) SetPublic(ctx context.Context, slug string, public bool) error {

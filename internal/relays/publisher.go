@@ -58,6 +58,22 @@ func (p *Publisher) Publish(evt nostr.Event, extra []string) {
 	}()
 }
 
+// Fetch pulls every event matching filter from the default relays until EOSE,
+// deduplicated by id. Used by the reconciler to rebuild the index from relay
+// state — proof that the derived data is derivable, not sqz-owned.
+func (p *Publisher) Fetch(ctx context.Context, filter nostr.Filter) []nostr.Event {
+	seen := make(map[string]bool)
+	out := make([]nostr.Event, 0)
+	for ev := range p.pool.FetchMany(ctx, p.defaults, filter) {
+		if ev.Event == nil || seen[ev.Event.ID] {
+			continue
+		}
+		seen[ev.Event.ID] = true
+		out = append(out, *ev.Event)
+	}
+	return out
+}
+
 // normalize trims each URL and defaults a bare host to wss://. Empty entries are
 // dropped.
 func normalize(urls []string) []string {
