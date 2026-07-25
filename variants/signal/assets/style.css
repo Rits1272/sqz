@@ -1,0 +1,627 @@
+/* sqz — "signal"
+ *
+ * One idea carries the page: a string goes in long and comes out short, in
+ * the same place, and you watch it happen. Everything else is quiet enough
+ * to let that read.
+ */
+
+:root {
+  --bg:        #E7E9EE;
+  --bg-deep:   #DDE0E7;
+  --surface:   #FCFCFD;
+  --line:      #CFD4DE;
+  --line-soft: #DFE3EA;
+  --ink:       #13161C;
+  --ink-2:     #59607180;
+  --ink-mid:   #596071;
+  --accent:    #2F3DE0;
+  --accent-in: #FFFFFF;
+  --accent-wash:#2F3DE014;
+  --amber:     #9A5B00;
+  --amber-wash:#9A5B0014;
+  --bad:       #B3261E;
+  --good:      #0E7A55;
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --ease: cubic-bezier(.2, .85, .25, 1);
+  --gut: clamp(20px, 5vw, 64px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #0D0F14;
+    --bg-deep:   #090A0E;
+    --surface:   #151922;
+    --line:      #272D3A;
+    --line-soft: #1E232E;
+    --ink:       #E8EBF1;
+    --ink-2:     #8D95A980;
+    --ink-mid:   #8D95A9;
+    --accent:    #8B92FF;
+    --accent-in: #0D0F14;
+    --accent-wash:#8B92FF1F;
+    --amber:     #F0B44A;
+    --amber-wash:#F0B44A1F;
+    --bad:       #FF8A7D;
+    --good:      #4FCB9B;
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* Several components below are flex/grid, which would otherwise win over the
+   hidden attribute. */
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+.vh {
+  position: absolute; width: 1px; height: 1px;
+  margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* ------------------------------------------------------------------- bar */
+
+.bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 26px var(--gut) 0;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.bar-lead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+
+.mark {
+  font-size: 19px;
+  font-weight: 680;
+  letter-spacing: -.045em;
+  color: var(--ink);
+  text-decoration: none;
+  line-height: 1;
+}
+
+.mark-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-mid);
+  letter-spacing: -.005em;
+}
+
+.bar-end { flex: none; }
+
+.ident {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.ident-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--good);
+  flex: none;
+}
+
+.ident-key {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: -.02em;
+}
+
+.ident-out {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-mid);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+.ident-out:hover { color: var(--ink); background: var(--line-soft); }
+
+/* ---------------------------------------------------------------- layout */
+
+main {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--gut) 80px;
+}
+
+/* ----------------------------------------------------------------- stage */
+
+.stage {
+  padding: clamp(40px, 7vw, 78px) 0 0;
+}
+
+.stage-tag {
+  margin: 0 0 18px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+  transition: opacity .25s var(--ease);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.stage-tag::before {
+  content: "";
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--ink-mid);
+  flex: none;
+}
+.stage-tag[data-state="done"] { color: var(--accent); }
+.stage-tag[data-state="done"]::before { background: var(--accent); }
+
+/* Both strings occupy one cell, so the short one arrives exactly where the
+   long one left. */
+.strip {
+  display: grid;
+  grid-template-areas: "a";
+  align-items: start;
+  min-height: 1.5em;
+}
+
+.strip-line {
+  grid-area: a;
+  font-family: var(--mono);
+  font-size: clamp(19px, 3.4vw, 34px);
+  line-height: 1.35;
+  letter-spacing: -.03em;
+  word-break: break-all;
+  min-width: 0;
+}
+
+.strip-in { color: var(--ink); }
+.strip[data-dim="1"] .strip-in { color: var(--ink-mid); }
+
+.strip-out {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* Each character is its own box, so collapsing its width pulls its
+   neighbours along. That is the whole trick. */
+.ch {
+  display: inline-block;
+  width: 1ch;
+  overflow: hidden;
+  vertical-align: top;
+  transition:
+    width .34s var(--ease),
+    opacity .2s linear,
+    filter .2s linear;
+}
+.ch.gone { width: 0; opacity: 0; filter: blur(2px); }
+.ch.hidden { width: 0; opacity: 0; }
+
+/* ----------------------------------------------------------------- gauge */
+
+.gauge { margin-top: 22px; }
+
+.gauge-rail {
+  position: relative;
+  height: 3px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.gauge-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: var(--ink);
+  transition: width .5s var(--ease), background-color .3s linear;
+}
+.gauge-rail[data-done="1"] .gauge-fill { background: var(--accent); }
+
+.gauge-read {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: -.01em;
+  color: var(--ink-mid);
+}
+
+.gauge-num { font-variant-numeric: tabular-nums; color: var(--ink); }
+.gauge-num-out { color: var(--ink-mid); }
+.gauge-rail[data-done="1"] + .gauge-read .gauge-num-out { color: var(--accent); }
+.gauge-sep { color: var(--ink-mid); }
+.gauge-ratio { color: var(--ink-mid); padding-left: 6px; }
+.gauge-ratio:not(:empty)::before {
+  content: "";
+  display: inline-block;
+  width: 1px; height: 9px;
+  background: var(--line);
+  margin-right: 12px;
+  vertical-align: -1px;
+}
+
+/* ---------------------------------------------------------------- landed */
+
+.landed {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 26px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.landed-url {
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 2px;
+  word-break: break-all;
+  min-width: 0;
+}
+.landed-url:hover { border-bottom-color: var(--accent); color: var(--accent); }
+
+/* ---------------------------------------------------------------- status */
+
+.status {
+  margin: 22px 0 0;
+  font-size: 14px;
+  color: var(--ink-mid);
+  padding-left: 14px;
+  border-left: 2px solid var(--line);
+}
+.status[data-kind="error"] { color: var(--bad); border-left-color: var(--bad); }
+.status[data-kind="good"]  { color: var(--good); border-left-color: var(--good); }
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  appearance: none;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 550;
+  letter-spacing: -.01em;
+  border-radius: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  transition: background-color .16s linear, color .16s linear, border-color .16s linear, transform .12s var(--ease);
+  border: 1px solid transparent;
+}
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .55; cursor: default; transform: none; }
+
+.btn-line {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.btn-line:hover:not(:disabled) { border-color: var(--ink-mid); }
+
+.btn-solid {
+  background: var(--accent);
+  color: var(--accent-in);
+}
+.btn-solid:hover:not(:disabled) { filter: brightness(1.08); }
+
+.btn-go {
+  justify-content: space-between;
+  padding: 12px 16px;
+  min-width: 168px;
+}
+.btn-go-price {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 400;
+  opacity: .72;
+}
+
+/* ----------------------------------------------------------------- panel */
+
+.panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 230px) auto;
+  align-items: end;
+  gap: 18px;
+  margin-top: 44px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+.field { min-width: 0; }
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+  margin-bottom: 8px;
+}
+.field-hint {
+  font-weight: 400;
+  letter-spacing: .04em;
+  text-transform: none;
+  opacity: .72;
+}
+
+.input {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: 8px 0;
+  min-width: 0;
+}
+.input::placeholder { color: var(--ink-2); }
+.input:focus { outline: 0; border-bottom-color: var(--accent); }
+.input:focus-visible { outline: 0; border-bottom: 2px solid var(--accent); padding-bottom: 7px; }
+
+.slug-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.slug-wrap:focus-within { border-bottom-color: var(--accent); }
+.slug-prefix {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ink-mid);
+  white-space: nowrap;
+  flex: none;
+  padding: 8px 0;
+}
+.input-slug { border-bottom: 0; }
+.input-slug:focus-visible { border-bottom: 0; padding-bottom: 8px; }
+
+/* ------------------------------------------------------------------- pay */
+
+.head {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: -.015em;
+}
+
+.pay {
+  margin-top: 40px;
+  padding: 24px;
+  border: 1px solid var(--amber);
+  border-radius: 14px;
+  background: var(--amber-wash);
+}
+.pay .head { color: var(--amber); }
+.pay-note { margin: 0 0 16px; font-size: 14px; color: var(--ink-mid); max-width: 54ch; }
+
+.pay-code {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-all;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-mid);
+  max-height: 8.6em;
+  overflow-y: auto;
+}
+
+.pay-acts { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+
+/* ---------------------------------------------------------------- ledger */
+
+.ledger { margin-top: 56px; }
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.row:first-child { border-top: 1px solid var(--line); }
+
+.row-main { min-width: 0; }
+
+.row-slug {
+  display: block;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ink);
+  text-decoration: none;
+  letter-spacing: -.01em;
+}
+.row-slug:hover { color: var(--accent); }
+
+.row-dest {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-mid);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
+.row-clicks {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.row-clicks span { color: var(--ink-mid); font-size: 11px; }
+
+.row-act {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 11px;
+  color: var(--ink-mid);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.row-act:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }
+.row-act:disabled { opacity: .5; cursor: default; }
+
+.empty {
+  margin: 0;
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  color: var(--ink-mid);
+}
+
+/* ----------------------------------------------------------------- facts */
+
+.facts {
+  margin-top: 64px;
+  padding-top: 26px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 26px;
+}
+.facts p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-mid);
+  max-width: 36ch;
+  padding-left: 18px;
+  border-left: 1px solid var(--line-soft);
+}
+.facts p:first-child { padding-left: 0; border-left: 0; }
+.facts-k { color: var(--ink); font-weight: 600; }
+
+/* ------------------------------------------------------------------ foot */
+
+.foot {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--gut) 44px;
+  font-size: 12px;
+  color: var(--ink-mid);
+}
+.foot p { margin: 0; }
+.foot-mono { font-family: var(--mono); }
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 860px) {
+  .panel { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .btn-go { width: 100%; }
+  .facts { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .facts p { max-width: none; padding: 0 0 0 14px; border-left: 1px solid var(--line-soft); }
+  .facts p:first-child { padding-left: 14px; border-left: 1px solid var(--line-soft); }
+}
+
+@media (max-width: 560px) {
+  .bar { padding-top: 20px; flex-wrap: wrap; gap: 12px; }
+  .mark-note { display: none; }
+  .strip { min-height: 1.4em; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; }
+  .row-act { grid-column: 2; }
+  .row-clicks { grid-row: 1; grid-column: 2; }
+  .gauge-ratio { padding-left: 0; }
+  .gauge-ratio:not(:empty)::before {
+    content: "·";
+    width: auto; height: auto;
+    background: none;
+    color: var(--line);
+    margin-right: 6px;
+    vertical-align: baseline;
+  }
+  .gauge-read { flex-wrap: wrap; gap: 8px; }
+  .landed { gap: 10px; }
+}
+
+/* --------------------------------------------------- reduced motion path
+ * Motion is the thesis, so its absence needs its own design rather than a
+ * disabled one. Here the two strings sit stacked and simultaneous: the long
+ * one struck through above, the short one below, with the rail measuring the
+ * distance between them. The compression is stated instead of performed. */
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: .001ms !important; animation-duration: .001ms !important; }
+
+  .strip {
+    grid-template-areas: "a" "b";
+    gap: 14px;
+    min-height: 0;
+  }
+  .strip-in  { grid-area: a; }
+  .strip-out { grid-area: b; }
+
+  .strip[data-state="done"] .strip-in,
+  .strip[data-state="demo-done"] .strip-in {
+    color: var(--ink-mid);
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+    text-decoration-color: currentColor;
+  }
+
+  .strip-out::before {
+    content: "";
+    display: block;
+    width: 22px;
+    height: 1px;
+    background: var(--accent);
+    margin-bottom: 12px;
+  }
+  .strip[data-state="idle"] .strip-out::before,
+  .strip[data-state="armed"] .strip-out::before { display: none; }
+
+  .ch, .ch.gone, .ch.hidden {
+    width: auto; opacity: 1; filter: none; overflow: visible;
+  }
+}

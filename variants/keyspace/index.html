@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sqz — your keyspace</title>
+<meta name="description" content="Short links you sign with your own nostr key and pay for in sats. Your npub is the namespace.">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='11' fill='none' stroke='%236257d6' stroke-width='2.5'/><path d='M16 5 L25 21 L7 21 Z' fill='none' stroke='%236257d6' stroke-width='2.5'/></svg>">
+</head>
+<body>
+
+<a class="skip" href="#work">Skip to the link form</a>
+
+<header class="bar">
+  <a class="brand" href="/">
+    <span class="brand-name">sqz</span>
+    <span class="brand-sub">link namespace, keyed to you</span>
+  </a>
+
+  <div class="bar-end">
+    <button id="connect" class="btn btn-key" type="button">
+      <span class="btn-key-dot" aria-hidden="true"></span>
+      Connect key
+    </button>
+
+    <div id="chip" class="chip" hidden>
+      <span class="chip-sigil" id="chip-sigil" aria-hidden="true"></span>
+      <span class="chip-key" id="chip-key"></span>
+      <button id="disconnect" class="chip-out" type="button">Disconnect</button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ─────────────────────────── identity rail ─────────────────────────── -->
+  <aside class="rail" aria-labelledby="rail-title">
+    <h2 class="rail-title" id="rail-title">Your key</h2>
+
+    <figure class="sigil-frame">
+      <div class="sigil" id="sigil" role="img" aria-label="No key connected"></div>
+      <figcaption class="sigil-cap" id="sigil-cap">
+        Drawn from the 32 bytes of your public key. Nobody else's looks like it.
+      </figcaption>
+    </figure>
+
+    <!-- Signed out -->
+    <div class="rail-out" id="rail-out">
+      <p class="rail-lede">sqz has no accounts. Your nostr key signs every link, and the link belongs to you whether or not sqz stays online.</p>
+      <button class="btn btn-primary btn-wide" id="connect-2" type="button">Connect key</button>
+      <p class="rail-fine">Needs a NIP-07 extension — Alby or nos2x. Your private key never leaves it.</p>
+    </div>
+
+    <!-- Signed in -->
+    <div class="rail-in" id="rail-in" hidden>
+      <div class="keyview">
+        <div class="keytabs" role="tablist" aria-label="Key format">
+          <button class="keytab is-on" id="tab-npub" type="button" role="tab" aria-selected="true" aria-controls="keyblock">npub</button>
+          <button class="keytab" id="tab-hex" type="button" role="tab" aria-selected="false" aria-controls="keyblock">hex</button>
+        </div>
+        <div class="keyblock" id="keyblock" role="tabpanel" aria-live="polite"></div>
+        <button class="btn btn-ghost btn-wide" id="copy-key" type="button">Copy npub</button>
+      </div>
+
+      <dl class="tally">
+        <div><dt>Links</dt><dd id="stat-links">0</dd></div>
+        <div><dt>Clicks</dt><dd id="stat-clicks">0</dd></div>
+        <div><dt>Per link</dt><dd class="tally-sat">10<span>sats</span></dd></div>
+      </dl>
+    </div>
+  </aside>
+
+  <!-- ────────────────────────────── workspace ──────────────────────────── -->
+  <section class="work" id="work">
+
+    <form id="form" class="card compose" autocomplete="off">
+      <h2 class="card-title">Make a link</h2>
+
+      <div class="field">
+        <label for="url">Destination</label>
+        <input id="url" type="url" name="url" placeholder="https://example.com/a/very/long/path"
+               spellcheck="false" required>
+      </div>
+
+      <div class="compose-row">
+        <div class="field">
+          <label for="slug">Name it <span class="opt">optional</span></label>
+          <div class="slugbox">
+            <span class="slug-prefix" id="slug-prefix">sqz.link/…/</span>
+            <input id="slug" type="text" name="slug" placeholder="auto" spellcheck="false" maxlength="64">
+          </div>
+        </div>
+
+        <button id="create" class="btn btn-primary btn-create" type="submit">
+          <span class="btn-create-label">Sign &amp; publish</span>
+          <span class="btn-create-cost">10 sats</span>
+        </button>
+      </div>
+
+      <!-- The signing moment: what your extension is being asked to put its
+           signature on, shown while it waits. -->
+      <div class="signing" id="signing" hidden>
+        <div class="signing-head">
+          <span class="signing-pulse" aria-hidden="true"></span>
+          <strong>Waiting for your extension</strong>
+        </div>
+        <p class="signing-note" id="signing-note">Approve the signature to publish this event under your key.</p>
+        <dl class="signing-event" id="signing-event"></dl>
+      </div>
+    </form>
+
+    <p class="notice" id="notice" hidden></p>
+
+    <output class="card result" id="result" hidden>
+      <div class="result-head">
+        <h2 class="card-title">Published</h2>
+        <button class="btn btn-ghost" id="copy" type="button">Copy</button>
+      </div>
+      <a class="result-url" id="result-url" href="#" rel="noopener"></a>
+      <p class="result-note" id="result-note"></p>
+    </output>
+
+    <section class="card invoice" id="invoice" hidden aria-labelledby="invoice-title">
+      <h2 class="card-title" id="invoice-title">Pay 10 sats to publish</h2>
+      <p class="invoice-note">The event is signed. sqz will index it once this Lightning invoice settles — then press sign &amp; publish again.</p>
+      <code class="invoice-code" id="invoice-code"></code>
+      <div class="invoice-acts">
+        <a class="btn btn-sat" id="invoice-open" href="#">Open in wallet</a>
+        <button class="btn btn-ghost" id="invoice-copy" type="button">Copy invoice</button>
+      </div>
+    </section>
+
+    <section class="links" id="links" aria-labelledby="links-title">
+      <div class="links-head">
+        <h2 class="card-title" id="links-title">Your links</h2>
+        <span class="links-count" id="links-count"></span>
+      </div>
+      <div id="links-body">
+        <p class="empty">Connect your key to see the links signed with it.</p>
+      </div>
+    </section>
+
+  </section>
+</main>
+
+<footer class="foot">
+  <p>Each link is a <strong>kind 30078</strong> event signed by your key. sqz indexes it and resolves it. sqz cannot forge one, and cannot take one back.</p>
+</footer>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

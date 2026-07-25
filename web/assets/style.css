@@ -1,0 +1,767 @@
+/* sqz
+ *
+ * Colour story: violet to amber — nostr identity to Lightning money. This
+ * product joins those two networks, so the gradient carries a meaning rather
+ * than decorating. It appears in exactly four places: the ambient page glow,
+ * the primary action, the compression ratio, and the step numbers. Nowhere else.
+ *
+ * Surfaces are flat. Depth comes from a 1px border and, at most, a soft
+ * shadow — never a bevel or an inset gradient. That restraint is the whole
+ * difference between this and a skeuomorphic pastiche.
+ */
+
+:root {
+  --bg:          #0A0A0F;
+  --surface:     #121218;
+  --surface-2:   #17171F;
+  --surface-3:   #1D1D26;
+  --line:        rgba(255,255,255,.07);
+  --line-2:      rgba(255,255,255,.13);
+  --ink:         #F2F2F7;
+  --ink-2:       #9C9CAE;
+  --ink-3:       #6E6E7C;
+
+  --violet:      #8B6BFF;
+  --violet-soft: rgba(139,107,255,.16);
+  --amber:       #FFB020;
+  --success:     #3DD68C;
+  --danger:      #FF6B6B;
+
+  --grad: linear-gradient(102deg, var(--violet) 0%, #B47BF0 46%, var(--amber) 100%);
+
+  --r-sm: 8px;
+  --r:    12px;
+  --r-lg: 18px;
+
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --ease:   cubic-bezier(.22,.68,.36,1);
+  --spring: cubic-bezier(.34,1.46,.44,1);
+
+  --shadow:    0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.6);
+  --shadow-lg: 0 2px 4px rgba(0,0,0,.32), 0 24px 60px -24px rgba(0,0,0,.72);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:          #FAFAFC;
+    --surface:     #FFFFFF;
+    --surface-2:   #F6F6F9;
+    --surface-3:   #EDEDF2;
+    --line:        rgba(12,12,26,.09);
+    --line-2:      rgba(12,12,26,.16);
+    --ink:         #0B0B12;
+    --ink-2:       #55556A;
+    --ink-3:       #7A7A8C;
+
+    --violet:      #6A45F0;
+    --violet-soft: rgba(106,69,240,.10);
+    /* Amber must darken on light or it fails contrast wherever it is text. */
+    --amber:       #B87400;
+    --success:     #12A05C;
+    --danger:      #D93838;
+
+    --shadow:    0 1px 2px rgba(12,12,26,.06), 0 8px 24px -14px rgba(12,12,26,.18);
+    --shadow-lg: 0 2px 4px rgba(12,12,26,.06), 0 24px 60px -28px rgba(12,12,26,.24);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.006em;
+  overflow-x: hidden;
+}
+
+/* One soft light source, behind everything. */
+.glow {
+  position: fixed;
+  top: -30vh;
+  left: 50%;
+  width: min(1100px, 130vw);
+  height: 70vh;
+  transform: translateX(-50%);
+  background:
+    radial-gradient(50% 50% at 35% 50%, rgba(139,107,255,.20), transparent 70%),
+    radial-gradient(46% 46% at 68% 42%, rgba(255,176,32,.13), transparent 70%);
+  filter: blur(28px);
+  pointer-events: none;
+  z-index: 0;
+}
+@media (prefers-color-scheme: light) { .glow { opacity: .55; } }
+
+main, .nav, .foot { position: relative; z-index: 1; }
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 22px 96px;
+}
+
+/* Entrance: the page assembles once, top-down. Purposeful, not ambient. */
+[data-enter] {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: rise .62s var(--ease) forwards;
+}
+[data-enter="1"] { animation-delay: .02s; }
+[data-enter="2"] { animation-delay: .10s; }
+[data-enter="3"] { animation-delay: .18s; }
+[data-enter="4"] { animation-delay: .30s; }
+
+@keyframes rise { to { opacity: 1; transform: none; } }
+
+/* ----------------------------------------------------------------- nav */
+
+.nav {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  color: var(--ink);
+  border-radius: var(--r-sm);
+}
+.brand:focus-visible { outline: 2px solid var(--violet); outline-offset: 4px; }
+.brand-mark { width: 22px; height: 22px; fill: var(--ink); flex: none; }
+.brand-mark .brand-arrow { stroke: var(--amber); }
+.brand-mark-sm { width: 16px; height: 16px; }
+.brand-name { font-size: 17px; font-weight: 640; letter-spacing: -.03em; }
+
+/* The jaws close a little on hover — the product's own gesture, in miniature. */
+.brand-mark rect { transition: transform .3s var(--spring); }
+.brand:hover .brand-mark rect:nth-of-type(1) { transform: translateX(1.5px); }
+.brand:hover .brand-mark rect:nth-of-type(2) { transform: translateX(-1.5px); }
+.brand:hover .brand-mark rect:nth-of-type(3) { transform: translateX(-1.5px); }
+
+.nav-end { display: flex; align-items: center; gap: 10px; }
+
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 13px;
+  animation: rise .4s var(--ease) both;
+}
+.account-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+.account-key { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.account-out {
+  border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: 12px; color: var(--ink-3);
+  padding: 4px 6px; border-radius: 6px;
+  transition: color .16s var(--ease), background .16s var(--ease);
+}
+.account-out:hover { color: var(--ink); background: var(--surface-3); }
+.account-out:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
+
+/* ---------------------------------------------------------------- hero */
+
+.hero { padding: 30px 0; text-align: center; }
+
+.hero-title {
+  margin: 0 0 14px;
+  font-size: clamp(38px, 7.2vw, 60px);
+  line-height: 1.03;
+  font-weight: 680;
+  letter-spacing: -.042em;
+}
+
+.hero-sub {
+  margin: 0 auto;
+  max-width: 46ch;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------ composer */
+
+.composer {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-lg);
+}
+
+.field { display: block; }
+
+.field-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  min-height: 20px;
+}
+
+label { font-size: 13px; font-weight: 530; color: var(--ink-2); }
+.opt { color: var(--ink-3); font-weight: 400; }
+
+input[type="url"], input[type="text"], input[type="password"] {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 13px 14px;
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+}
+input::placeholder { color: var(--ink-3); }
+input:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--violet);
+  box-shadow: 0 0 0 4px var(--violet-soft);
+}
+
+/* Live character meter. Fills toward amber as the URL grows — visual tension
+   that the compression then releases. */
+.meter { display: inline-flex; align-items: center; gap: 9px; animation: pop .34s var(--spring) both; }
+@keyframes pop { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
+
+.meter-track { width: 68px; height: 4px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
+.meter-fill {
+  display: block; height: 100%; width: 0;
+  background: var(--grad);
+  border-radius: 999px;
+  transition: width .42s var(--ease);
+}
+.meter-val { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.meter-val b { color: var(--ink-2); font-weight: 560; }
+
+.compose-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 14px;
+}
+.field-name { min-width: 0; }
+
+.prefixed {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+}
+.prefixed:focus-within {
+  background: var(--surface);
+  border-color: var(--violet);
+  box-shadow: 0 0 0 4px var(--violet-soft);
+}
+/* The prefix is a distinct segment, divided by a hairline, so it never reads as
+   part of the name the user is typing. It sizes to its content and does not
+   shrink — the domain must always stay fully legible (a cut-off "sqzit.in/"
+   looks broken). The input gives up width instead. */
+.prefix {
+  display: flex; align-items: center;
+  padding: 0 10px 0 14px;
+  margin-right: 10px;
+  font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  flex: 0 0 auto;
+  border-right: 1px solid var(--line);
+  align-self: stretch;
+}
+/* Input keeps a usable minimum; on a narrow screen the row scrolls rather than
+   crushing the field to nothing. */
+.prefixed input { border: 0; background: none; padding-left: 0; border-radius: 0; flex: 1 1 auto; min-width: 5ch; }
+.prefixed input:focus { box-shadow: none; background: none; }
+
+/* -------------------------------------------------------------- buttons */
+
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 560;
+  letter-spacing: -.01em;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 12px 16px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: transform .18s var(--spring), background .18s var(--ease),
+              border-color .18s var(--ease), box-shadow .18s var(--ease), color .18s var(--ease);
+}
+.btn:hover { background: var(--surface-3); border-color: var(--line-2); }
+.btn:active { transform: scale(.975); }
+.btn:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.btn[disabled] { cursor: not-allowed; opacity: .62; }
+.btn[disabled]:active { transform: none; }
+
+.btn-ghost { background: transparent; }
+
+/* The one gradient control on the page. */
+.btn-primary {
+  background: var(--grad);
+  border-color: transparent;
+  color: #0B0713;
+  padding: 13px 26px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,.18),
+              0 10px 26px -12px rgba(139,107,255,.72),
+              inset 0 1px 0 rgba(255,255,255,.28);
+}
+.btn-primary:hover {
+  background: var(--grad);
+  border-color: transparent;
+  transform: translateY(-1.5px);
+  box-shadow: 0 2px 4px rgba(0,0,0,.18),
+              0 18px 38px -12px rgba(139,107,255,.9),
+              inset 0 1px 0 rgba(255,255,255,.34);
+}
+.btn-primary:active { transform: translateY(0) scale(.982); }
+.btn-primary:active { transform: scale(.975); }
+
+.btn-face { display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.2; }
+.btn-line { display: inline-flex; align-items: center; gap: 7px; }
+.btn-label { font-weight: 640; font-size: 15px; }
+
+/* The arrow travels on hover — the same left-to-right motion the product
+   performs on the URL. */
+.btn-arrow { width: 15px; height: 15px; flex: none; transition: transform .26s var(--spring); }
+.btn-primary:hover .btn-arrow { transform: translateX(3px); }
+
+/* Price reads as a fact attached to the action, not a second label. */
+.btn-meta {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 560;
+  opacity: .78;
+  font-variant-numeric: tabular-nums;
+}
+.btn-bolt { width: 9px; height: 9px; flex: none; }
+
+/* A single light sweep on hover. It fires once per hover rather than looping,
+   so it reads as a material catching the light, not a loading state. */
+.btn-sheen {
+  position: absolute; inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.btn-sheen::before {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; left: -60%;
+  width: 45%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.42), transparent);
+  transform: skewX(-18deg);
+  opacity: 0;
+}
+.btn-primary:hover .btn-sheen::before { animation: sheen .72s var(--ease) 1; }
+@keyframes sheen {
+  from { left: -60%; opacity: 1; }
+  to   { left: 115%; opacity: 0; }
+}
+
+/* Waiting on the extension: the delay is the user's to resolve, and silence
+   would read as a hang. */
+.btn-wait { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; gap: 5px; }
+.btn-wait i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: bounce 1.05s var(--ease) infinite; }
+.btn-wait i:nth-child(2) { animation-delay: .13s; }
+.btn-wait i:nth-child(3) { animation-delay: .26s; }
+@keyframes bounce { 0%,60%,100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-4px); } }
+
+.btn.is-waiting .btn-face { opacity: 0; }
+.btn.is-waiting .btn-wait { display: flex; }
+
+/* Copy confirms in place — the control becomes its own receipt. */
+.btn-copy.is-done {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+/* --------------------------------------------------------------- result */
+
+.result {
+  display: block;
+  margin-top: 18px;
+  padding: 18px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  animation: resultIn .5s var(--spring) both;
+}
+@keyframes resultIn {
+  from { opacity: 0; transform: translateY(-6px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+.result-top { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.result-tag { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 560; color: var(--ink-2); }
+.result-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: breathe 2.4s var(--ease) infinite; }
+@keyframes breathe {
+  0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent); }
+  60%     { box-shadow: 0 0 0 6px transparent; }
+}
+
+/* The payoff. The only text that carries the gradient. */
+.result-ratio {
+  font-size: 26px; font-weight: 700; letter-spacing: -.035em;
+  background: var(--grad);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-url { display: flex; align-items: center; gap: 10px; }
+.result-url a {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 15px; font-weight: 500;
+  color: var(--ink); text-decoration: none;
+  padding: 11px 13px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: border-color .18s var(--ease), color .18s var(--ease);
+}
+.result-url a:hover { border-color: var(--violet); color: var(--violet); }
+.result-url a:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+
+.result-note { margin: 11px 0 0; font-size: 13px; color: var(--ink-3); }
+
+/* --------------------------------------------------------------- notice */
+
+.notice {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  font-size: 13.5px; line-height: 1.5;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--ink-3);
+  border-radius: var(--r-sm);
+  animation: noticeIn .34s var(--ease) both;
+}
+.notice[data-kind="error"] { border-left-color: var(--danger); }
+.notice[data-kind="good"]  { border-left-color: var(--success); }
+.notice a {
+  color: var(--ink);
+  font-weight: 560;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--violet);
+}
+.notice a:hover { color: var(--violet); }
+.notice a:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: 3px; }
+@keyframes noticeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* -------------------------------------------------------------- invoice */
+
+.invoice {
+  margin-top: 18px; padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow);
+  animation: resultIn .5s var(--spring) both;
+}
+.invoice-head { text-align: center; }
+.invoice-head h2 { margin: 0 0 6px; font-size: 19px; font-weight: 640; letter-spacing: -.02em; }
+.invoice-amount {
+  background: var(--grad);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.invoice-head p { margin: 0 auto 18px; max-width: 42ch; font-size: 13.5px; color: var(--ink-2); }
+
+/* The QR is the hero of the panel: centered, large, on its own white card. */
+.qr { margin: 0 auto 14px; text-align: center; max-width: 260px; }
+.qr img {
+  display: block;
+  width: 240px; height: 240px; max-width: 100%;
+  /* Always light-on-white, whatever the page theme: an inverted QR fails on
+     some scanners, and quiet-zone padding is part of the spec. */
+  background: #fff;
+  padding: 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  margin: 0 auto;
+  box-shadow: var(--shadow);
+}
+.qr figcaption {
+  margin-top: 10px; font-size: 12px; color: var(--ink-3);
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.qr figcaption::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber);
+  animation: breathe 2s var(--ease) infinite;
+}
+
+/* Invoice string: a compact, truncated line with its own copy button. */
+.invoice-string { display: flex; gap: 8px; align-items: stretch; margin: 0 auto; max-width: 420px; }
+.invoice-code {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 12px; line-height: 1.4;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.invoice-acts { display: flex; gap: 10px; margin-top: 14px; justify-content: center; flex-wrap: wrap; }
+
+.invoice-manual { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.invoice-manual summary {
+  cursor: pointer; font-size: 13px; color: var(--ink-2);
+  list-style: none; user-select: none;
+}
+.invoice-manual summary::-webkit-details-marker { display: none; }
+.invoice-manual summary::before { content: "+ "; color: var(--ink-3); }
+.invoice-manual[open] summary::before { content: "\2212 "; }
+.invoice-manual summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 3px; border-radius: 4px; }
+.invoice-manual p { margin: 10px 0; font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+.manual-row { display: flex; gap: 10px; }
+.manual-row input { flex: 1; min-width: 0; }
+
+@media (max-width: 620px) {
+  .qr img { width: 200px; height: 200px; }
+}
+
+/* ---------------------------------------------------------------- links */
+
+.links { margin-top: 40px; }
+.links-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.links-head h2 { margin: 0; font-size: 17px; font-weight: 620; letter-spacing: -.022em; }
+.links-count { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  transition: border-color .2s var(--ease), transform .2s var(--ease), box-shadow .2s var(--ease);
+}
+.row + .row { margin-top: 8px; }
+.row:hover { border-color: var(--line-2); transform: translateY(-1px); box-shadow: var(--shadow); }
+.row.is-new { animation: resultIn .5s var(--spring) both; }
+
+.row-main { min-width: 0; }
+.row-slug { font-family: var(--mono); font-size: 14px; font-weight: 540; color: var(--ink); text-decoration: none; }
+.row-slug:hover { color: var(--violet); }
+.row-slug:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; border-radius: 4px; }
+.row-dest { display: block; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.row-clicks { font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row-clicks span { color: var(--ink-3); font-size: 12px; }
+
+/* Actions stay present for keyboard and touch; hover only firms them up. */
+.row-act {
+  border: 1px solid transparent; background: none; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; color: var(--ink-3);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  opacity: .7;
+  transition: opacity .18s var(--ease), color .18s var(--ease),
+              background .18s var(--ease), border-color .18s var(--ease);
+}
+.row:hover .row-act { opacity: 1; }
+.row-act:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
+.row-act:focus-visible { opacity: 1; outline: 2px solid var(--violet); outline-offset: 2px; }
+
+/* Revoked rows leave rather than vanish, so the change stays legible. */
+.row.is-leaving { animation: leave .34s var(--ease) forwards; pointer-events: none; overflow: hidden; }
+@keyframes leave {
+  to { opacity: 0; transform: translateX(10px); height: 0; padding-top: 0; padding-bottom: 0; margin-top: 0; border-width: 0; }
+}
+
+.empty {
+  padding: 26px 16px; text-align: center;
+  font-size: 13.5px; color: var(--ink-3);
+  background: var(--surface);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r);
+}
+
+/* ------------------------------------------------------------------ how */
+
+.how { margin-top: 56px; }
+.how-title {
+  margin: 0 0 18px;
+  font-size: 13px; font-weight: 560; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; grid-template-columns: repeat(3, 1fr); }
+.steps li { min-width: 0; }
+.step-n {
+  display: block;
+  font-family: var(--mono); font-size: 11px; font-weight: 600; letter-spacing: .1em;
+  background: var(--grad);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  margin-bottom: 8px;
+}
+.steps h3 { margin: 0 0 5px; font-size: 14.5px; font-weight: 600; letter-spacing: -.015em; }
+.steps p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+
+/* ----------------------------------------------------------------- foot */
+
+.foot {
+  max-width: 720px; margin: 0 auto;
+  padding: 26px 22px 40px;
+  border-top: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+}
+.foot-brand { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.foot-brand .brand-mark { fill: var(--ink-2); }
+.foot p { margin: 0; font-size: 12.5px; color: var(--ink-3); }
+
+/* ----------------------------------------------------------------- misc */
+
+[hidden] { display: none !important; }
+
+@media (max-width: 620px) {
+  .hero { padding: 18px 0 24px; }
+  .composer { padding: 18px; border-radius: var(--r); }
+  .compose-row { grid-template-columns: 1fr; }
+  .btn-primary { padding: 13px 20px; }
+  .steps { grid-template-columns: 1fr; gap: 20px; }
+  .result-url { flex-direction: column; align-items: stretch; }
+  .row { grid-template-columns: minmax(0,1fr) auto; }
+  .row-clicks { grid-column: 1; }
+  .foot { flex-direction: column; align-items: flex-start; }
+}
+
+/* Motion is a layer over a design that already works without it. */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+  [data-enter] { opacity: 1; transform: none; }
+  .btn:active, .btn-primary:hover, .row:hover { transform: none; }
+  .row-act { opacity: 1; }
+}
+
+/* ------------------------------------------------------ sign-in options */
+
+.signin-group { display: flex; align-items: center; gap: 8px; }
+.linklike {
+  border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: 13px; color: var(--ink-3);
+  padding: 6px 4px; border-radius: 6px;
+  text-decoration: underline; text-underline-offset: 2px; text-decoration-color: var(--line-2);
+}
+.linklike:hover { color: var(--ink); }
+.linklike:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+.linklike-danger:hover { color: var(--danger); }
+
+.key-badge {
+  font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 34%, transparent);
+  padding: 2px 6px; border-radius: 999px;
+}
+
+/* ------------------------------------------------------------- key modal */
+
+.modal {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  background: rgba(6, 6, 12, .62);
+  backdrop-filter: blur(3px);
+  animation: fade .2s var(--ease) both;
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-card {
+  width: 100%; max-width: 460px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 20px;
+  animation: resultIn .28s var(--spring) both;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.modal-head h2 { margin: 0; font-size: 17px; font-weight: 640; letter-spacing: -.02em; }
+.modal-close {
+  border: 0; background: none; cursor: pointer;
+  font-size: 22px; line-height: 1; color: var(--ink-3);
+  padding: 2px 6px; border-radius: 6px;
+}
+.modal-close:hover { color: var(--ink); background: var(--surface-3); }
+.modal-close:focus-visible { outline: 2px solid var(--violet); outline-offset: 1px; }
+
+.modal-warn, .modal-note { margin: 0 0 14px; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); }
+.modal-warn {
+  padding: 11px 13px;
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 26%, transparent);
+  border-radius: var(--r-sm);
+}
+.modal-warn strong { color: var(--ink); }
+
+.nsec-row { display: flex; gap: 8px; align-items: stretch; }
+.nsec {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 11px 12px;
+  word-break: break-all;
+}
+#keymodal-import input { width: 100%; }
+
+.modal-acts { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
+.modal-acts .btn-primary { padding: 11px 20px; }
+
+@media (max-width: 620px) {
+  .signin-group { gap: 6px; }
+  .signin-group .btn { padding: 10px 12px; font-size: 13px; }
+  #signin-import { display: none; }
+}

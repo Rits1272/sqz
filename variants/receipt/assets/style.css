@@ -1,0 +1,616 @@
+/* sqz — the printed receipt.
+ *
+ * Every squeeze is a transaction, so the interface is the document a till
+ * produces: a narrow tape of paper, dot leaders, subtotals, perforations,
+ * and a rubber stamp for state changes.
+ *
+ * Light mode is thermal paper on a steel counter. Dark mode is the carbon
+ * copy — the duplicate sheet, violet-black, with the impression showing
+ * through pale. Both are printed, not rendered.
+ */
+
+:root {
+  /* the counter the receipt lies on */
+  --desk:        #868D93;
+  --desk-2:      #737A81;
+
+  /* the paper */
+  --paper:       #FAFAF7;
+  --paper-sunk:  #EFEFEA;
+  --ink:         #17181C;
+  --ink-mid:     #55575D;
+  --ink-faint:   #8A8C90;
+  --rule:        #C2C3BD;
+  --rule-faint:  #DFDFD8;
+
+  /* one accent: rubber-stamp aniline violet */
+  --stamp:       #5B3FA0;
+  --stamp-soft:  rgba(91, 63, 160, 0.10);
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "DejaVu Sans Mono",
+          "Liberation Mono", Consolas, monospace;
+
+  --slip: 27rem;
+  --u: 8px;
+  --shadow: 0 1px 0 rgba(0,0,0,.14), 0 10px 22px -10px rgba(0,0,0,.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --desk:        #08090C;
+    --desk-2:      #0E1014;
+    --paper:       #1E1B2C;
+    --paper-sunk:  #191627;
+    --ink:         #DAD6E8;
+    --ink-mid:     #948FAB;
+    --ink-faint:   #6B6683;
+    --rule:        #37334A;
+    --rule-faint:  #262336;
+    --stamp:       #AB8CFF;
+    --stamp-soft:  rgba(171, 140, 255, 0.13);
+    --shadow: 0 0 0 1px rgba(255,255,255,.04), 0 14px 30px -12px rgba(0,0,0,.8);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--desk);
+  /* brushed counter: fine vertical grain, lit from the upper left */
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 1px, transparent 1px 2px),
+    repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 1px, transparent 1px 5px),
+    radial-gradient(120% 90% at 30% 0%, rgba(255,255,255,.12), transparent 62%),
+    linear-gradient(165deg, var(--desk-2), var(--desk) 55%, var(--desk-2));
+  font-variant-ligatures: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------- the desk */
+
+.counter {
+  min-height: 100vh;
+  padding: calc(var(--u) * 5) var(--u) calc(var(--u) * 9);
+}
+
+.slips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: calc(var(--u) * 4);
+  max-width: calc(var(--slip) * 2 + var(--u) * 4);
+  margin: 0 auto;
+}
+
+/* ------------------------------------------------------------ the paper */
+
+.slip {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--slip);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+  /* thermal banding + the tooth of cheap paper */
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.018) 0 1px, transparent 1px 4px),
+    radial-gradient(rgba(0,0,0,.03) 1px, transparent 1px);
+  background-size: auto, 5px 5px;
+}
+
+.slip-order  { transform: rotate(-0.25deg); }
+.slip-register { transform: rotate(0.35deg); }
+
+/* the printer bezel the tape feeds out from */
+.bezel {
+  height: 7px;
+  background:
+    linear-gradient(var(--rule), var(--rule-faint));
+  border-bottom: 1px solid var(--rule);
+}
+
+.pad {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--u) * 3) calc(var(--u) * 3) calc(var(--u) * 2);
+}
+
+/* torn bottom edge — the tape pulled off the roll */
+.tear {
+  position: absolute;
+  left: 0; right: 0; bottom: -11px;
+  height: 11px;
+  background: var(--paper);
+  -webkit-clip-path: polygon(0% 0%, 1.2500% 100%, 2.5000% 0%, 3.7500% 100%, 5.0000% 0%, 6.2500% 100%, 7.5000% 0%, 8.7500% 100%, 10.0000% 0%, 11.2500% 100%, 12.5000% 0%, 13.7500% 100%, 15.0000% 0%, 16.2500% 100%, 17.5000% 0%, 18.7500% 100%, 20.0000% 0%, 21.2500% 100%, 22.5000% 0%, 23.7500% 100%, 25.0000% 0%, 26.2500% 100%, 27.5000% 0%, 28.7500% 100%, 30.0000% 0%, 31.2500% 100%, 32.5000% 0%, 33.7500% 100%, 35.0000% 0%, 36.2500% 100%, 37.5000% 0%, 38.7500% 100%, 40.0000% 0%, 41.2500% 100%, 42.5000% 0%, 43.7500% 100%, 45.0000% 0%, 46.2500% 100%, 47.5000% 0%, 48.7500% 100%, 50.0000% 0%, 51.2500% 100%, 52.5000% 0%, 53.7500% 100%, 55.0000% 0%, 56.2500% 100%, 57.5000% 0%, 58.7500% 100%, 60.0000% 0%, 61.2500% 100%, 62.5000% 0%, 63.7500% 100%, 65.0000% 0%, 66.2500% 100%, 67.5000% 0%, 68.7500% 100%, 70.0000% 0%, 71.2500% 100%, 72.5000% 0%, 73.7500% 100%, 75.0000% 0%, 76.2500% 100%, 77.5000% 0%, 78.7500% 100%, 80.0000% 0%, 81.2500% 100%, 82.5000% 0%, 83.7500% 100%, 85.0000% 0%, 86.2500% 100%, 87.5000% 0%, 88.7500% 100%, 90.0000% 0%, 91.2500% 100%, 92.5000% 0%, 93.7500% 100%, 95.0000% 0%, 96.2500% 100%, 97.5000% 0%, 98.7500% 100%, 100.0000% 0%);
+  clip-path: polygon(0% 0%, 1.2500% 100%, 2.5000% 0%, 3.7500% 100%, 5.0000% 0%, 6.2500% 100%, 7.5000% 0%, 8.7500% 100%, 10.0000% 0%, 11.2500% 100%, 12.5000% 0%, 13.7500% 100%, 15.0000% 0%, 16.2500% 100%, 17.5000% 0%, 18.7500% 100%, 20.0000% 0%, 21.2500% 100%, 22.5000% 0%, 23.7500% 100%, 25.0000% 0%, 26.2500% 100%, 27.5000% 0%, 28.7500% 100%, 30.0000% 0%, 31.2500% 100%, 32.5000% 0%, 33.7500% 100%, 35.0000% 0%, 36.2500% 100%, 37.5000% 0%, 38.7500% 100%, 40.0000% 0%, 41.2500% 100%, 42.5000% 0%, 43.7500% 100%, 45.0000% 0%, 46.2500% 100%, 47.5000% 0%, 48.7500% 100%, 50.0000% 0%, 51.2500% 100%, 52.5000% 0%, 53.7500% 100%, 55.0000% 0%, 56.2500% 100%, 57.5000% 0%, 58.7500% 100%, 60.0000% 0%, 61.2500% 100%, 62.5000% 0%, 63.7500% 100%, 65.0000% 0%, 66.2500% 100%, 67.5000% 0%, 68.7500% 100%, 70.0000% 0%, 71.2500% 100%, 72.5000% 0%, 73.7500% 100%, 75.0000% 0%, 76.2500% 100%, 77.5000% 0%, 78.7500% 100%, 80.0000% 0%, 81.2500% 100%, 82.5000% 0%, 83.7500% 100%, 85.0000% 0%, 86.2500% 100%, 87.5000% 0%, 88.7500% 100%, 90.0000% 0%, 91.2500% 100%, 92.5000% 0%, 93.7500% 100%, 95.0000% 0%, 96.2500% 100%, 97.5000% 0%, 98.7500% 100%, 100.0000% 0%);
+}
+
+/* --------------------------------------------------------------- header */
+
+.shop { text-align: center; margin: 0 0 calc(var(--u) * 2); }
+
+.shop-name {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-transform: lowercase;
+}
+
+.shop-sub {
+  margin: calc(var(--u) * 1) 0 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink-mid);
+}
+
+.shop-addr {
+  margin: 4px 0 0;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+
+/* --------------------------------------------------- perforation / rules */
+
+.perf {
+  position: relative;
+  height: calc(var(--u) * 2.5);
+  margin: 0 calc(var(--u) * -3);
+  background:
+    radial-gradient(circle at left center,  var(--desk) 6px, transparent 6.5px),
+    radial-gradient(circle at right center, var(--desk) 6px, transparent 6.5px);
+}
+.perf::before {
+  content: "";
+  position: absolute;
+  left: 12px; right: 12px; top: 50%;
+  border-top: 1px dashed var(--rule);
+}
+
+.rule-head {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+  margin: calc(var(--u) * 2) 0 calc(var(--u) * 1.5);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.24em;
+  color: var(--ink);
+}
+.rule-head::after {
+  content: "";
+  flex: 1;
+  border-top: 2px solid var(--ink);
+}
+.rule-head-lg { font-size: 13px; margin-top: 0; }
+
+/* ------------------------------------------------------- line item lines */
+
+.meta, .tally { margin: 0; }
+
+.line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+}
+.line dt {
+  margin: 0;
+  color: var(--ink-mid);
+  white-space: nowrap;
+}
+.line dd {
+  margin: 0;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  max-width: 62%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dots {
+  flex: 1 1 auto;
+  min-width: 12px;
+  border-bottom: 1px dotted var(--rule);
+  transform: translateY(-4px);
+}
+
+.tally { margin-top: calc(var(--u) * 2); }
+.tally .line-total {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--rule);
+  font-weight: 700;
+}
+.tally .line-total dt { color: var(--ink); text-transform: uppercase; letter-spacing: .12em; }
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  font: inherit;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 7px 12px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  border-radius: 1px;
+}
+.btn:hover { background: var(--paper-sunk); }
+.btn:active { transform: translateY(1px); }
+.btn[disabled] { opacity: .5; cursor: progress; }
+
+.btn-ink {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn-ink:hover { background: var(--ink-mid); }
+
+.btn-quiet {
+  border-color: var(--rule);
+  color: var(--ink-mid);
+}
+.btn-quiet:hover { color: var(--ink); border-color: var(--ink); }
+
+.signin-row {
+  display: flex;
+  gap: var(--u);
+  margin-top: calc(var(--u) * 1.5);
+}
+#signin { flex: 1; text-align: center; }
+#signout { margin-left: auto; }
+
+.btn-print {
+  display: block;
+  width: 100%;
+  margin-top: calc(var(--u) * 2.5);
+  padding: 11px 12px;
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.btn-print:hover { background: var(--ink-mid); border-color: var(--ink-mid); }
+.btn-print-label { display: block; font-size: 14px; font-weight: 700; letter-spacing: 0.2em; }
+.btn-print-sub {
+  display: block;
+  margin-top: 3px;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  opacity: .62;
+}
+
+:focus-visible {
+  outline: 2px solid var(--stamp);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- fields */
+
+.field { margin-top: calc(var(--u) * 1.75); }
+
+.field label, .reg-col {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--ink-mid);
+  margin-bottom: 5px;
+}
+.opt { text-transform: none; letter-spacing: .04em; color: var(--ink-faint); }
+
+.field input {
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+  padding: 7px 2px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--ink);
+  border-radius: 0;
+}
+.field input::placeholder { color: var(--ink-faint); }
+.field input:focus { outline: 0; border-bottom-color: var(--stamp); background: var(--stamp-soft); }
+.field input:focus-visible { outline: 0; }
+
+.field-note {
+  margin: 5px 0 0;
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.slug-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  border-bottom: 1px solid var(--ink);
+}
+.slug-wrap:focus-within { border-bottom-color: var(--stamp); background: var(--stamp-soft); }
+.slug-wrap .slug-prefix {
+  font-size: 13px;
+  color: var(--ink-faint);
+  padding-bottom: 7px;
+  white-space: nowrap;
+  max-width: 55%;
+  overflow: hidden;
+}
+.slug-wrap input { border-bottom: 0; flex: 1; min-width: 0; }
+
+/* --------------------------------------------------------------- notices */
+
+.notice {
+  margin: calc(var(--u) * 2) 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  border: 1px dashed var(--rule);
+  color: var(--ink-mid);
+  background: var(--paper-sunk);
+}
+.notice[data-kind="error"] {
+  border: 1px solid var(--stamp);
+  border-left-width: 4px;
+  color: var(--ink);
+  background: var(--stamp-soft);
+}
+
+/* ---------------------------------------------------------------- stamps */
+
+.stamp {
+  display: block;
+  margin: calc(var(--u) * 1.5) 0;
+  text-align: center;
+}
+.stamp span {
+  display: inline-block;
+  padding: 5px 16px;
+  border: 2px solid var(--stamp);
+  border-radius: 2px;
+  color: var(--stamp);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+  transform: rotate(-4deg);
+  opacity: .82;
+}
+
+/* --------------------------------------------------------------- result */
+
+.result { display: block; }
+
+.result-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  padding: 9px 10px;
+  background: var(--paper-sunk);
+  border: 1px solid var(--rule);
+}
+.result-url {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.4;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.result-row .btn { align-self: flex-start; }
+.result-note {
+  margin: 6px 0 0;
+  font-size: 10.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------------- payment */
+
+.due-note { margin: 0 0 var(--u); font-size: 12px; color: var(--ink-mid); }
+
+.invoice-code {
+  display: block;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  background: var(--paper-sunk);
+  border: 1px dashed var(--rule);
+  color: var(--ink);
+  max-height: 9.5em;
+  overflow-y: auto;
+}
+
+.due-actions { display: flex; gap: var(--u); margin-top: var(--u); }
+.due-actions .btn { flex: 1; text-align: center; }
+
+/* --------------------------------------------------------------- ledger */
+
+.reg-sub {
+  margin: 0 0 calc(var(--u) * 2);
+  font-size: 11.5px;
+  color: var(--ink-mid);
+}
+
+.ledger {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  padding: calc(var(--u) * 0.5) 0;
+}
+.ledger .item { display: block; }
+
+.empty {
+  margin: 0;
+  padding: calc(var(--u) * 2.5) 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-faint);
+  line-height: 1.8;
+}
+
+.item {
+  padding: calc(var(--u) * 1.25) 0;
+  border-bottom: 1px dotted var(--rule);
+}
+.item:last-child { border-bottom: 0; }
+
+.item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.item-slug {
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 13.5px;
+  text-decoration: none;
+  border-bottom: 2px solid var(--rule);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+.item-slug:hover { border-bottom-color: var(--stamp); color: var(--stamp); }
+.item-qty {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.item-qty span { color: var(--ink-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+
+.item-dest {
+  margin: 3px 0 0;
+  font-size: 11px;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.item-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--u);
+  margin-top: 7px;
+}
+.item-date {
+  flex: 1;
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.item-act {
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  padding: 4px 2px;
+  min-height: 26px;
+  background: transparent;
+  color: var(--ink-faint);
+  border: 0;
+  border-bottom: 1px solid transparent;
+  cursor: pointer;
+}
+.item-act + .item-act { margin-left: 6px; }
+.item-act:hover { color: var(--ink); border-bottom-color: var(--ink); }
+.item-act[disabled] { opacity: .5; cursor: progress; }
+
+.item-void { opacity: .72; }
+.item-void .item-slug { text-decoration: line-through; border-bottom: 0; }
+.voided {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--stamp);
+  border: 1px solid var(--stamp);
+  padding: 2px 7px;
+  transform: rotate(-3deg);
+  display: inline-block;
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.foot { margin-top: auto; padding-top: calc(var(--u) * 3); text-align: center; }
+
+.barcode {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 34px;
+  margin-bottom: 7px;
+}
+.barcode i { display: block; height: 100%; background: var(--ink); }
+
+.foot-code {
+  margin: 0 0 var(--u);
+  font-size: 9.5px;
+  letter-spacing: 0;
+  color: var(--ink-mid);
+  overflow-wrap: anywhere;
+}
+.foot-line {
+  margin: 2px 0;
+  font-size: 10px;
+  letter-spacing: .08em;
+  color: var(--ink-faint);
+}
+.foot-thanks {
+  margin: calc(var(--u) * 2) 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--ink);
+}
+
+/* --------------------------------------------------------------- narrow */
+
+@media (max-width: 900px) {
+  .slips { gap: calc(var(--u) * 3); }
+  .slip-order, .slip-register { transform: none; }
+}
+
+@media (max-width: 430px) {
+  :root { --u: 7px; }
+  .counter { padding: calc(var(--u) * 2.5) 11px calc(var(--u) * 6); }
+  .pad { padding: calc(var(--u) * 2.5) calc(var(--u) * 2.5) calc(var(--u) * 2); }
+  .perf { margin: 0 calc(var(--u) * -2.5); }
+  .shop-name { font-size: 28px; }
+  .signin-row { flex-wrap: wrap; }
+  .line dd { max-width: 55%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .btn:active { transform: none; }
+  .slip-order, .slip-register { transform: none; }
+}

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sqz — link press</title>
+<meta name="description" content="Load a long URL, press once, take a short link. Signed with your nostr key, paid in sats over Lightning.">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%2314181A'/><rect x='5' y='6' width='22' height='8' fill='%23E39A05'/><rect x='5' y='20' width='22' height='6' fill='%23E39A05'/><rect x='13' y='14' width='6' height='6' fill='%236B7472'/></svg>">
+</head>
+<body>
+
+<div class="machine">
+
+  <!-- Top rail: maker's plate on the left, key switch on the right. -->
+  <header class="rail">
+    <div class="maker">
+      <span class="screw screw-a" aria-hidden="true"></span>
+      <span class="screw screw-b" aria-hidden="true"></span>
+      <a class="maker-mark" href="/">sqz</a>
+      <p class="maker-spec">
+        Link press <span class="sep">/</span> Mod. 402
+        <span class="sep">/</span> 10 sat per cycle
+      </p>
+    </div>
+
+    <div class="key">
+      <span class="lamp" id="lamp" data-state="off" aria-hidden="true"></span>
+      <button id="signin" class="switch" type="button">
+        <span class="switch-cap">Connect key</span>
+      </button>
+      <div id="identity" class="ident" hidden>
+        <span class="ident-label">Operator</span>
+        <span class="ident-key" id="identity-key"></span>
+        <button id="signout" class="ident-out" type="button">Release</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="console">
+
+    <!-- The press itself: stock in the bed, ram down, part out the chute. -->
+    <section class="press" id="press" aria-labelledby="press-title">
+      <div class="panel-head">
+        <h1 id="press-title">Press a link</h1>
+        <span class="panel-tag">Bed 01</span>
+      </div>
+
+      <form id="form" class="bed" autocomplete="off" novalidate>
+
+        <!-- Stock: the long URL loaded into the die. -->
+        <div class="stock">
+          <div class="stock-head">
+            <label for="url">Long URL</label>
+            <div class="counter" id="counter-in" title="Characters loaded">
+              <span class="counter-label">In</span>
+              <span class="counter-digits" id="count-in" aria-live="off"></span>
+            </div>
+          </div>
+          <textarea
+            id="url"
+            name="url"
+            rows="3"
+            spellcheck="false"
+            placeholder="https://"
+            aria-describedby="url-help"></textarea>
+          <p class="help" id="url-help">Paste the address you want shortened. It is stored in an event you sign.</p>
+        </div>
+
+        <!-- The ram assembly: slug on the left, actuator on the right. -->
+        <div class="ram-row">
+          <div class="die">
+            <label for="slug">Name <span class="opt">optional</span></label>
+            <div class="die-input">
+              <span class="die-prefix" id="slug-prefix">sqz/</span>
+              <input id="slug" name="slug" type="text" placeholder="auto" spellcheck="false" maxlength="64">
+            </div>
+          </div>
+
+          <button id="squeeze" class="ram" type="submit">
+            <span class="ram-body">
+              <span class="ram-label" id="ram-label">Press</span>
+              <span class="ram-travel" aria-hidden="true">▼ ▼ ▼ ▼ ▼ ▼</span>
+              <span class="ram-cost">10 sat</span>
+            </span>
+            <span class="ram-face" aria-hidden="true"></span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Discharge chute: the finished part. -->
+      <output class="chute" id="result" hidden>
+        <div class="chute-head">
+          <span class="chute-tag">Pressed</span>
+          <div class="counter counter-out">
+            <span class="counter-label">Out</span>
+            <span class="counter-digits" id="count-out"></span>
+          </div>
+        </div>
+        <div class="part">
+          <a class="part-url" id="result-url" href="#" rel="noopener"></a>
+          <button class="btn btn-copy" id="copy" type="button">Copy</button>
+        </div>
+        <p class="part-note" id="result-ratio"></p>
+      </output>
+
+      <p class="notice" id="notice" hidden></p>
+    </section>
+
+    <!-- Data plate: riveted, engraved, non-interactive facts. -->
+    <aside class="plate" aria-label="Machine data plate">
+      <span class="screw screw-a" aria-hidden="true"></span>
+      <span class="screw screw-b" aria-hidden="true"></span>
+      <span class="screw screw-c" aria-hidden="true"></span>
+      <span class="screw screw-d" aria-hidden="true"></span>
+
+      <h2 class="plate-title">Specification</h2>
+
+      <div class="gauge">
+        <span class="gauge-num">10</span>
+        <span class="gauge-unit">sat<br>per cycle</span>
+      </div>
+      <dl class="plate-rows">
+        <div><dt>Event</dt><dd>kind 30078</dd></div>
+        <div><dt>Signed by</dt><dd>Your key, in your extension</dd></div>
+        <div><dt>Auth</dt><dd>NIP-98 per request</dd></div>
+        <div><dt>Payment</dt><dd>L402 over Lightning</dd></div>
+        <div><dt>Stored on</dt><dd>Relays you choose</dd></div>
+      </dl>
+      <p class="plate-foot">sqz indexes your links. It cannot forge or rewrite them.</p>
+      <div class="hazard" aria-hidden="true"></div>
+    </aside>
+
+    <!-- Payment module: only lit when the paywall asks. -->
+    <section class="module" id="invoice" hidden aria-labelledby="invoice-title">
+      <div class="hazard hazard-top" aria-hidden="true"></div>
+      <div class="module-body">
+        <div class="panel-head">
+          <h2 id="invoice-title">Pay to run the cycle</h2>
+          <span class="panel-tag panel-tag-hot">402</span>
+        </div>
+        <p class="module-note">Settle this invoice in your Lightning wallet, then press again. Nothing is published until it clears.</p>
+        <code class="invoice-code" id="invoice-code"></code>
+        <div class="module-acts">
+          <a class="btn btn-hot" id="invoice-open" href="#">Open wallet</a>
+          <button class="btn" id="invoice-copy" type="button">Copy invoice</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Output log. -->
+    <section class="log" id="ledger" aria-labelledby="log-title">
+      <div class="panel-head">
+        <h2 id="log-title">Output log</h2>
+        <span class="panel-tag" id="log-count"></span>
+      </div>
+      <div id="ledger-body"></div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span class="foot-mark">sqz</span>
+    <p>Every link is an event you signed. Take it to any relay and it still resolves to you.</p>
+  </footer>
+
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

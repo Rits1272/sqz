@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sqz — short links you own</title>
+<meta name="description" content="Short links signed with your nostr key and paid in sats. sqz indexes your links; it cannot forge them or take them back.">
+<link rel="stylesheet" href="/assets/style.css">
+<!-- Browser-key signer (optional path for users without an extension). ES module,
+     so it loads deferred and announces itself; app.js waits for it when needed. -->
+<script type="module" src="/assets/localkey.js"></script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230A0A0F'/><g fill='%238B6BFF'><rect x='4' y='6' width='4' height='20' rx='1.5'/><rect x='24' y='6' width='4' height='20' rx='1.5'/><rect x='21' y='11' width='2.5' height='10' rx='1'/></g><path d='M11 16h7M15 13l3 3-3 3' fill='none' stroke='%23FFB020' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+
+<!-- Ambient colour: violet to amber, the two networks this product joins.
+     One soft light source for the whole page, never surface chrome. -->
+<div class="glow" aria-hidden="true"></div>
+
+<header class="nav" data-enter="1">
+  <a class="brand" href="/" aria-label="sqz — home">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <rect x="2" y="3" width="5" height="26" rx="2"/>
+      <rect x="25" y="3" width="5" height="26" rx="2"/>
+      <rect x="22" y="10" width="3" height="12" rx="1.2"/>
+      <path class="brand-arrow" d="M10 16h8M15 12.5 18.5 16 15 19.5" fill="none"
+            stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span class="brand-name">sqz</span>
+  </a>
+
+  <div class="nav-end">
+    <div id="signin-group" class="signin-group">
+      <button id="signin" class="btn btn-ghost" type="button">Connect key</button>
+      <button id="signin-local" class="btn btn-ghost" type="button">Create key</button>
+      <button id="signin-import" class="linklike" type="button">Import</button>
+    </div>
+    <div id="identity" class="account" hidden>
+      <span class="account-dot" aria-hidden="true"></span>
+      <span class="account-key" id="identity-key"></span>
+      <span id="key-badge" class="key-badge" hidden title="This key is stored in your browser">browser key</span>
+      <button id="backup-btn" class="account-out" type="button" hidden>Back up</button>
+      <button id="signout" class="account-out" type="button">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<!-- Key material lives only here: reveal an nsec to back up, or restore one. -->
+<div id="keymodal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="keymodal-title">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="keymodal-title">Back up your key</h2>
+      <button id="keymodal-close" class="modal-close" type="button" aria-label="Close">&times;</button>
+    </div>
+
+    <div id="keymodal-backup">
+      <p class="modal-warn">This key lives in <strong>this browser</strong>. Save it now — if you clear
+        your browser or switch devices without it, the links you make are gone for good, and anyone
+        with this key controls them. Keep it secret.</p>
+      <div class="nsec-row">
+        <code id="nsec-out" class="nsec"></code>
+        <button id="nsec-copy" class="btn btn-soft btn-copy" type="button"><span class="copy-label">Copy</span></button>
+      </div>
+      <div class="modal-acts">
+        <button id="backup-done" class="btn btn-primary" type="button">
+          <span class="btn-face"><span class="btn-label">I've saved it</span></span>
+        </button>
+        <button id="key-forget" class="linklike linklike-danger" type="button" hidden>Forget this key</button>
+      </div>
+    </div>
+
+    <div id="keymodal-import" hidden>
+      <p class="modal-note">Paste an <code>nsec</code> (or 64-character hex key) to sign in with an
+        existing key. It's stored in this browser.</p>
+      <input id="nsec-in" type="password" spellcheck="false" autocomplete="off"
+             placeholder="nsec1…" aria-label="Private key to import">
+      <div class="modal-acts">
+        <button id="import-submit" class="btn btn-primary" type="button">
+          <span class="btn-face"><span class="btn-label">Import key</span></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<main>
+
+  <section class="hero" data-enter="2">
+    <h1 class="hero-title">Short links you own.</h1>
+    <p class="hero-sub">
+      Every link is an event signed by your key and kept on relays you choose.
+      sqz indexes it and resolves it — it can't forge one, and it can't take one back.
+    </p>
+  </section>
+
+  <!-- The product, usable immediately. No signup wall in front of it. -->
+  <section class="composer" data-enter="3" aria-label="Create a short link">
+    <form id="form" autocomplete="off" novalidate>
+
+      <div class="field">
+        <div class="field-top">
+          <label for="url">Paste a long URL</label>
+          <span class="meter" id="meter" hidden>
+            <span class="meter-track" aria-hidden="true"><i class="meter-fill" id="meter-fill"></i></span>
+            <span class="meter-val"><b id="meter-val">0</b> chars</span>
+          </span>
+        </div>
+        <input id="url" name="url" type="url" inputmode="url" spellcheck="false"
+               placeholder="https://example.com/a/very/long/address" required>
+      </div>
+
+      <div class="compose-row">
+        <div class="field field-name">
+          <label for="slug">Custom name <span class="opt">optional</span></label>
+          <div class="prefixed">
+            <span class="prefix" id="slug-prefix">sqzit.in/</span>
+            <input id="slug" name="slug" type="text" spellcheck="false" maxlength="64" placeholder="auto">
+          </div>
+        </div>
+
+        <button id="squeeze" class="btn btn-primary" type="submit">
+          <span class="btn-sheen" aria-hidden="true"></span>
+          <span class="btn-face">
+            <span class="btn-line">
+              <span class="btn-label" id="btn-label">Shorten</span>
+              <svg class="btn-arrow" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                <path d="M2 8h11M9 4l4 4-4 4" fill="none" stroke="currentColor"
+                      stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </span>
+            <span class="btn-meta" id="btn-meta">
+              <svg class="btn-bolt" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+                <path d="M7 1 3 6.6h2.2L5 11l4-5.6H6.8z" fill="currentColor"/>
+              </svg>10 sats
+            </span>
+          </span>
+          <span class="btn-wait" aria-hidden="true"><i></i><i></i><i></i></span>
+        </button>
+      </div>
+    </form>
+
+    <!-- The payoff. The ratio gets the expressive moment because it is the
+         one number that says the product worked. -->
+    <output class="result" id="result" hidden>
+      <div class="result-top">
+        <span class="result-tag"><span class="result-dot" aria-hidden="true"></span>Live</span>
+        <span class="result-ratio" id="result-ratio" aria-live="polite"></span>
+      </div>
+      <div class="result-url">
+        <a id="result-url" href="#" rel="noopener"></a>
+        <button class="btn btn-soft btn-copy" id="copy" type="button">
+          <span class="copy-label">Copy</span>
+        </button>
+      </div>
+      <p class="result-note" id="result-note"></p>
+    </output>
+
+    <p class="notice" id="notice" hidden></p>
+  </section>
+
+  <!-- Payment. Shown whenever the paywall asks — the invoice leads, always
+       visible. Scan it, open it in a wallet, or pay with a browser extension;
+       every route is offered rather than one being forced. -->
+  <section class="invoice" id="invoice" hidden aria-labelledby="invoice-title">
+    <div class="invoice-head">
+      <h2 id="invoice-title">Scan to pay <span class="invoice-amount">10 sats</span></h2>
+      <p>Point any Lightning wallet at the code below. Your link publishes the
+         moment it's paid. Paying needs a Lightning wallet — not a nostr one.</p>
+    </div>
+
+    <!-- The QR is the hero of this panel. -->
+    <figure class="qr" id="qr">
+      <img id="qr-img" alt="QR code for this Lightning invoice" width="240" height="240">
+      <figcaption id="qr-status">Waiting for payment…</figcaption>
+    </figure>
+
+    <div class="invoice-string">
+      <code class="invoice-code" id="invoice-code"></code>
+      <button class="btn btn-soft btn-copy" id="invoice-copy" type="button">
+        <span class="copy-label">Copy</span>
+      </button>
+    </div>
+
+    <div class="invoice-acts">
+      <button class="btn btn-primary" id="pay-webln" type="button" hidden>
+        <span class="btn-face"><span class="btn-label">Pay with extension</span></span>
+      </button>
+      <a class="btn btn-soft" id="invoice-open" href="#">Open in wallet</a>
+    </div>
+
+    <!-- Manual completion for wallets that hand back a preimage but can't talk
+         to the page directly. Tucked away — most people just scan. -->
+    <details class="invoice-manual" id="invoice-manual">
+      <summary>Have a payment proof?</summary>
+      <p>Only if your wallet showed a <em>preimage</em> after paying — most
+         mobile and custodial wallets (Wallet of Satoshi, Primal, …) don't. If
+         yours didn't, pay with a browser extension above instead.</p>
+      <div class="manual-row">
+        <input id="preimage" type="text" spellcheck="false" autocomplete="off"
+               placeholder="preimage (64 hex characters)" aria-label="Payment preimage">
+        <button class="btn btn-soft" id="preimage-submit" type="button">Complete</button>
+      </div>
+    </details>
+  </section>
+
+  <section class="links" id="links" hidden aria-labelledby="links-title">
+    <div class="links-head">
+      <h2 id="links-title">Your links</h2>
+      <span class="links-count" id="links-count"></span>
+    </div>
+    <div id="links-body"></div>
+  </section>
+
+  <!-- Numbered because it genuinely is a sequence, not for decoration. -->
+  <section class="how" data-enter="4" aria-labelledby="how-title">
+    <h2 class="how-title" id="how-title">How a link is made</h2>
+    <ol class="steps">
+      <li>
+        <span class="step-n">01</span>
+        <h3>You sign it</h3>
+        <p>Your extension signs a kind 30078 event. The key never leaves your browser, and sqz never asks for it.</p>
+      </li>
+      <li>
+        <span class="step-n">02</span>
+        <h3>You pay for it</h3>
+        <p>Ten sats over Lightning, once, per link. No account, no subscription, no card on file.</p>
+      </li>
+      <li>
+        <span class="step-n">03</span>
+        <h3>It stays yours</h3>
+        <p>The event lives on your relays. Point it somewhere new or revoke it whenever you like, without asking us.</p>
+      </li>
+    </ol>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="foot-brand">
+    <svg class="brand-mark brand-mark-sm" viewBox="0 0 32 32" aria-hidden="true">
+      <rect x="2" y="3" width="5" height="26" rx="2"/>
+      <rect x="25" y="3" width="5" height="26" rx="2"/>
+      <rect x="22" y="10" width="3" height="12" rx="1.2"/>
+      <path class="brand-arrow" d="M10 16h8M15 12.5 18.5 16 15 19.5" fill="none"
+            stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span>sqz</span>
+  </div>
+  <p>Links resolve from <span id="foot-domain">sqzit.in</span>. Built on nostr and Lightning.</p>
+</footer>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,941 @@
+/* sqz — the press.
+ *
+ * The page is built as a piece of shop-floor equipment: a bed you load stock
+ * into, a ram that comes down, a chute the finished part falls out of. Surfaces
+ * are either raised (bevelled, load-bearing, casts a shadow) or sunk (recessed,
+ * holds something). Nothing floats. Colour is borrowed from machine enamel and
+ * safety marking, not from software: painted grey-green housings, hazard amber
+ * on the actuating faces, signal red only where something is destroyed.
+ *
+ * Type is split by job, the way a real machine is: condensed grotesque for
+ * cast and engraved lettering, monospace for anything that is data the operator
+ * must read character by character (keys, URLs, invoices).
+ */
+
+:root {
+  /* Machine enamel — light housing. */
+  --bg:        #D5D9D6;
+  --panel:     #E9ECE8;
+  --panel-hi:  #F5F7F4;
+  --sunk:      #C3C8C4;
+  --sunk-deep: #B4BAB6;
+
+  --ink:    #14181A;
+  --ink-2:  #4C5451;
+  --ink-3:  #79817D;
+
+  --edge:      #A7AEA9;
+  --edge-hi:   #FFFFFF;
+  --edge-dark: #8B928D;
+
+  /* Safety marking. */
+  --amber:     #E09400;
+  --amber-lo:  #B87700;
+  --red:       #AE3025;
+  --red-lo:    #8C241B;
+  --lamp-on:   #3E9B62;
+  --lamp-off:  #8E9691;
+
+  /* Steel parts. */
+  --steel-hi:  #59635F;
+  --steel:     #333B39;
+  --steel-lo:  #1B2120;
+  --steel-ink: #F2F5F1;
+
+  --screw-hi:  #F2F4F0;
+  --screw-lo:  #949B96;
+
+  --shade-1: rgba(0, 0, 0, 0.16);
+  --shade-2: rgba(0, 0, 0, 0.30);
+
+  --display: "Arial Narrow", "Helvetica Neue Condensed", "Liberation Sans Narrow", sans-serif;
+  --heavy: Impact, "Haettenschweiler", "Arial Narrow Bold", "Arial Narrow", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --r: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #101312;
+    --panel:     #1B201E;
+    --panel-hi:  #242A28;
+    --sunk:      #0B0E0D;
+    --sunk-deep: #060808;
+
+    --ink:    #E3E8E4;
+    --ink-2:  #99A29D;
+    --ink-3:  #6C7570;
+
+    --edge:      #2E3634;
+    --edge-hi:   #3D4643;
+    --edge-dark: #0B0E0D;
+
+    --amber:     #EFA724;
+    --amber-lo:  #C4820E;
+    --red:       #D75242;
+    --red-lo:    #A93A2C;
+    --lamp-on:   #4EBE7B;
+    --lamp-off:  #414A47;
+
+    --steel-hi:  #454F4C;
+    --steel:     #262D2B;
+    --steel-lo:  #0C100F;
+    --steel-ink: #EEF2EE;
+
+    --screw-hi:  #6A7370;
+    --screw-lo:  #262C2A;
+
+    --shade-1: rgba(0, 0, 0, 0.40);
+    --shade-2: rgba(0, 0, 0, 0.60);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Several parts of this page are flex/grid containers that are also toggled
+   with the hidden attribute. display must not win over hidden. */
+[hidden] { display: none !important; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.5;
+  /* Cast texture: a fine speckle so the housing does not read as flat paper. */
+  background-image:
+    radial-gradient(circle at 20% 30%, var(--shade-1) 0.5px, transparent 0.6px),
+    radial-gradient(circle at 70% 65%, var(--shade-1) 0.5px, transparent 0.6px);
+  background-size: 7px 7px, 11px 11px;
+}
+
+.machine {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 22px 20px 40px;
+}
+
+/* ------------------------------------------------------------- surfaces */
+
+.press, .plate, .log, .module-body {
+  background: linear-gradient(var(--panel-hi), var(--panel));
+  border: 1px solid var(--edge);
+  border-radius: var(--r);
+  box-shadow:
+    inset 0 1px 0 var(--edge-hi),
+    inset 0 -1px 0 var(--shade-1),
+    0 2px 0 var(--shade-1);
+}
+
+.screw {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, var(--screw-hi), var(--screw-lo) 78%);
+  box-shadow: inset 0 0 0 1px var(--shade-2), 0 1px 0 var(--edge-hi);
+}
+.screw::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: linear-gradient(90deg, transparent 42%, var(--shade-2) 42% 58%, transparent 58%);
+  transform: rotate(28deg);
+}
+.screw-a { top: 8px; left: 8px; }
+.screw-b { top: 8px; right: 8px; }
+.screw-b::after { transform: rotate(-62deg); }
+.screw-c { bottom: 8px; left: 8px; }
+.screw-c::after { transform: rotate(74deg); }
+.screw-d { bottom: 8px; right: 8px; }
+.screw-d::after { transform: rotate(-12deg); }
+
+/* Hazard marking. Used only on faces that move or that take money. */
+.hazard {
+  height: 9px;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--amber) 0 9px,
+    var(--steel-lo) 9px 18px
+  );
+  border-radius: 0 0 2px 2px;
+}
+
+/* ----------------------------------------------------------- top rail */
+
+.rail {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.maker {
+  position: relative;
+  padding: 10px 26px 9px;
+  background: linear-gradient(var(--steel-hi), var(--steel));
+  border: 1px solid var(--steel-lo);
+  border-radius: var(--r);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 0 var(--shade-2);
+}
+.maker .screw { --screw-hi: #A8B0AC; --screw-lo: #1D2322; box-shadow: inset 0 0 0 1px rgba(0,0,0,.5); }
+.maker .screw-a { top: 50%; left: 8px; margin-top: -5px; }
+.maker .screw-b { top: 50%; right: 8px; margin-top: -5px; }
+
+.maker-mark {
+  display: block;
+  font-family: var(--heavy);
+  font-size: 34px;
+  line-height: 0.9;
+  letter-spacing: 0.01em;
+  color: var(--steel-ink);
+  text-decoration: none;
+  /* Cast lettering: raised off the plate. */
+  text-shadow: 0 1px 0 var(--steel-lo), 0 -1px 0 rgba(255, 255, 255, 0.22);
+}
+.maker-spec {
+  margin: 3px 0 0;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #B9C2BD;
+}
+.maker-spec .sep { color: var(--amber); }
+
+.key {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px;
+}
+
+.lamp {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--lamp-off);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.4), inset 0 -2px 3px var(--shade-2), 0 0 0 3px var(--sunk-deep);
+  flex: none;
+}
+.lamp[data-state="on"] {
+  background: var(--lamp-on);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5), inset 0 -2px 3px var(--shade-2),
+    0 0 0 3px var(--sunk-deep), 0 0 10px 1px color-mix(in srgb, var(--lamp-on) 60%, transparent);
+}
+
+/* The connect control is a key switch, not a link. */
+.switch {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  padding: 11px 18px;
+  background: linear-gradient(var(--panel-hi), var(--sunk));
+  border: 1px solid var(--edge-dark);
+  border-radius: var(--r);
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 3px 0 var(--edge-dark), 0 4px 6px var(--shade-1);
+  cursor: pointer;
+}
+.switch:hover { background: linear-gradient(var(--edge-hi), var(--panel)); }
+.switch:active {
+  transform: translateY(2px);
+  box-shadow: inset 0 1px 3px var(--shade-2), 0 1px 0 var(--edge-dark);
+}
+
+.ident {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 12px;
+  background: var(--sunk);
+  border: 1px solid var(--edge-dark);
+  border-radius: var(--r);
+  box-shadow: inset 0 2px 4px var(--shade-1);
+  max-width: 100%;
+}
+.ident-label {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ident-key {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ident-out {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  background: var(--panel);
+  border: 1px solid var(--edge-dark);
+  border-radius: 2px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.ident-out:hover { color: var(--ink); background: var(--panel-hi); }
+
+/* ------------------------------------------------------------- console */
+
+.console {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 286px;
+  grid-template-areas:
+    "press plate"
+    "module module"
+    "log log";
+  gap: 18px;
+  align-items: start;
+}
+.press  { grid-area: press; }
+.plate  { grid-area: plate; }
+.module { grid-area: module; }
+.log    { grid-area: log; }
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px 11px;
+  border-bottom: 1px solid var(--edge);
+  box-shadow: 0 1px 0 var(--edge-hi);
+}
+.panel-head h1, .panel-head h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.panel-tag {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 3px 7px;
+  background: var(--sunk);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 2px var(--shade-1);
+  white-space: nowrap;
+}
+.panel-tag-hot { color: var(--steel-lo); background: var(--amber); box-shadow: none; font-weight: 700; }
+
+/* ----------------------------------------------------------- the bed */
+
+.bed { padding: 16px; }
+
+.stock-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+label, .die label {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.opt { color: var(--ink-3); letter-spacing: 0.08em; }
+
+textarea, .die-input input {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid var(--edge-dark);
+  border-radius: 2px;
+  box-shadow: inset 0 2px 5px var(--shade-1), inset 0 -1px 0 var(--edge-hi);
+}
+textarea {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  resize: none;
+  overflow: hidden;
+  min-height: 78px;
+  line-height: 1.45;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  transition: transform 140ms cubic-bezier(0.3, 0, 0.2, 1);
+  transform-origin: 50% 100%;
+}
+textarea::placeholder, .die-input input::placeholder { color: var(--ink-3); }
+
+.help {
+  margin: 7px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+
+/* Mechanical stroke counter. Digits sit in a sunk window, one wheel each. */
+.counter { display: flex; align-items: center; gap: 7px; }
+.counter-label {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.counter-digits {
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  background: var(--steel-lo);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.counter-digits b {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+  background: linear-gradient(#232a28, #171d1c);
+  padding: 2px 4px;
+  min-width: 15px;
+  text-align: center;
+  border-radius: 1px;
+}
+.counter-digits b.pad { color: var(--ink-3); opacity: 0.45; }
+
+/* ------------------------------------------------------------ the ram */
+
+/* Name field on its own line, then the beam spanning the whole bed. */
+.ram-row {
+  display: grid;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+.die-input {
+  display: flex;
+  align-items: stretch;
+  margin-top: 6px;
+  background: var(--sunk);
+  border: 1px solid var(--edge-dark);
+  border-radius: 2px;
+  box-shadow: inset 0 2px 5px var(--shade-1);
+  overflow: hidden;
+}
+.die-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 11px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.die-input input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 12px 11px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* The heaviest object on the page. Steel body, hazard-marked contact face,
+   sitting on 7px of visible travel that it spends when actuated. */
+.ram {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r);
+  cursor: pointer;
+  width: 100%;
+  box-shadow: 0 8px 0 var(--steel-lo), 0 11px 16px var(--shade-2);
+  transition: transform 90ms cubic-bezier(0.2, 0, 0, 1), box-shadow 90ms linear;
+}
+.ram-body {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px 17px;
+  background: linear-gradient(var(--steel-hi), var(--steel) 62%, var(--steel-lo));
+  border: 1px solid var(--steel-lo);
+  border-bottom: 0;
+  border-radius: var(--r) var(--r) 0 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+}
+.ram-label {
+  font-family: var(--heavy);
+  font-size: 31px;
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  color: var(--steel-ink);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+/* Direction of travel, stencilled on the beam between label and price. */
+.ram-travel {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.5em;
+  color: rgba(255, 255, 255, 0.26);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ram:hover .ram-travel { color: rgba(240, 168, 30, 0.4); }
+.ram-cost {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+.ram-face {
+  display: block;
+  height: 11px;
+  background: repeating-linear-gradient(-45deg, var(--amber) 0 8px, var(--steel-lo) 8px 16px);
+  border: 1px solid var(--steel-lo);
+  border-top: 0;
+  border-radius: 0 0 var(--r) var(--r);
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.45);
+}
+.ram:hover .ram-body { background: linear-gradient(#65706C, var(--steel-hi) 62%, var(--steel)); }
+.ram:active, .is-pressing .ram {
+  transform: translateY(6px);
+  box-shadow: 0 1px 0 var(--steel-lo), 0 2px 5px var(--shade-2);
+}
+.ram[disabled] { cursor: progress; }
+.ram[disabled] .ram-label { color: #B9C2BD; }
+
+/* The stock takes the blow. */
+.is-pressing textarea { transform: scaleY(0.955); }
+
+/* ------------------------------------------------------- discharge chute */
+
+/* A recessed tray: the finished part has dropped into it and sits raised
+   inside the well. */
+.chute {
+  display: block;
+  margin: 0 16px 16px;
+  padding: 0 0 14px;
+  background: var(--sunk);
+  border: 1px solid var(--edge-dark);
+  border-radius: var(--r);
+  box-shadow: inset 0 3px 7px var(--shade-2);
+  animation: eject 260ms cubic-bezier(0.16, 0.9, 0.3, 1);
+}
+@keyframes eject {
+  from { transform: translateY(-16px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+.chute-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px 0;
+}
+.chute-tag {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink);
+  padding: 3px 9px;
+  background: var(--amber);
+  border-radius: 2px;
+  color: var(--steel-lo);
+}
+.part {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 14px 0;
+  padding: 11px 12px;
+  background: var(--panel-hi);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 1px 0 var(--shade-1);
+}
+.part-url {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 2px solid var(--amber);
+  padding-bottom: 1px;
+}
+.part-url:hover { color: var(--amber-lo); }
+.part-note {
+  margin: 9px 14px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.part-note strong { color: var(--ink); }
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-decoration: none;
+  padding: 9px 14px;
+  background: linear-gradient(var(--panel-hi), var(--sunk));
+  border: 1px solid var(--edge-dark);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 2px 0 var(--edge-dark);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+.btn:hover { background: linear-gradient(var(--edge-hi), var(--panel)); }
+.btn:active { transform: translateY(2px); box-shadow: inset 0 1px 3px var(--shade-2); }
+.btn-hot {
+  color: var(--steel-lo);
+  background: linear-gradient(#F2AE21, var(--amber));
+  border-color: var(--amber-lo);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 2px 0 var(--amber-lo);
+}
+.btn-hot:hover { background: linear-gradient(#FFC246, #EDA209); }
+
+/* --------------------------------------------------------------- notice */
+
+.notice {
+  display: flex;
+  gap: 10px;
+  margin: 0 16px 16px;
+  padding: 11px 13px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--panel-hi);
+  border: 1px solid var(--edge);
+  border-left: 5px solid var(--ink-3);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 var(--edge-hi);
+}
+.notice[data-kind="error"] { border-left-color: var(--red); }
+.notice[data-kind="done"] { border-left-color: var(--lamp-on); }
+.notice::before {
+  content: attr(data-kind);
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding-top: 2px;
+  flex: none;
+}
+
+/* ------------------------------------------------------------ data plate */
+
+.plate {
+  position: relative;
+  padding: 16px 16px 0;
+  overflow: hidden;
+}
+.plate-title {
+  margin: 0 0 12px;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--ink-2);
+  /* Engraved: cut into the plate rather than printed on it. */
+  text-shadow: 0 1px 0 var(--edge-hi);
+}
+/* Price window: the one number an operator checks before running a cycle. */
+.gauge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: var(--sunk);
+  border: 1px solid var(--edge-dark);
+  border-radius: 2px;
+  box-shadow: inset 0 3px 7px var(--shade-2);
+}
+.gauge-num {
+  font-family: var(--heavy);
+  font-size: 46px;
+  line-height: 0.82;
+  color: var(--amber-lo);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+.gauge-unit {
+  font-family: var(--display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  line-height: 1.35;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.plate-rows { margin: 0; }
+.plate-rows > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--edge);
+  box-shadow: 0 1px 0 var(--edge-hi);
+}
+.plate-rows dt {
+  font-family: var(--display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  flex: none;
+}
+.plate-rows dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  text-align: right;
+}
+.plate-foot {
+  /* Inset so the lower fasteners never sit on the text. */
+  margin: 12px 8px 30px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.plate .hazard { margin: 0 -16px; border-radius: 0; }
+/* Keep the lower fasteners clear of the hazard band. */
+.plate .screw-c, .plate .screw-d { bottom: 21px; }
+
+@media (prefers-color-scheme: dark) {
+  .gauge-num { color: var(--amber); }
+}
+
+/* --------------------------------------------------------- payment module */
+
+.module { border-radius: var(--r); overflow: hidden; }
+.hazard-top { border-radius: 2px 2px 0 0; }
+.module-body { border-radius: 0 0 var(--r) var(--r); border-top: 0; }
+.module-note {
+  margin: 14px 16px 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+.invoice-code {
+  display: block;
+  margin: 12px 16px 0;
+  padding: 12px 13px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink);
+  word-break: break-all;
+  background: var(--sunk);
+  border: 1px solid var(--edge-dark);
+  border-radius: 2px;
+  box-shadow: inset 0 2px 5px var(--shade-1);
+  max-height: 148px;
+  overflow-y: auto;
+}
+.module-acts { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 16px 18px; }
+
+/* ------------------------------------------------------------ output log */
+
+#ledger-body { padding: 6px 16px 16px; }
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--edge);
+  box-shadow: 0 1px 0 var(--edge-hi);
+}
+.row:last-child { border-bottom: 0; box-shadow: none; }
+.row-main { min-width: 0; }
+.row-slug {
+  display: block;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-slug:hover { color: var(--amber-lo); text-decoration: underline; }
+.row-dest {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-clicks {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.row-clicks span {
+  display: block;
+  font-family: var(--display);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.row-act {
+  font-family: var(--display);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--red);
+  background: var(--panel-hi);
+  border: 1px solid var(--edge-dark);
+  border-radius: 2px;
+  box-shadow: inset 0 1px 0 var(--edge-hi), 0 2px 0 var(--edge-dark);
+  padding: 7px 11px;
+  cursor: pointer;
+}
+.row-act:hover { color: #fff; background: linear-gradient(var(--red), var(--red-lo)); border-color: var(--red-lo); box-shadow: 0 2px 0 var(--red-lo); }
+.row-act[disabled] { color: var(--ink-3); cursor: progress; }
+
+.empty {
+  margin: 10px 0 6px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.empty strong { color: var(--ink); }
+
+/* -------------------------------------------------------------- footer */
+
+.foot {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--edge);
+  box-shadow: 0 -1px 0 var(--edge-hi) inset;
+}
+.foot-mark {
+  font-family: var(--heavy);
+  font-size: 16px;
+  color: var(--ink-3);
+  flex: none;
+}
+.foot p { margin: 0; font-size: 12.5px; color: var(--ink-3); max-width: 70ch; }
+
+/* --------------------------------------------------------------- focus */
+
+:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+textarea:focus-visible, .die-input:focus-within {
+  outline: 3px solid var(--amber);
+  outline-offset: 1px;
+}
+.die-input input:focus-visible { outline: none; }
+.ram:focus-visible { outline-offset: 3px; }
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 880px) {
+  .console {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "press" "module" "plate" "log";
+  }
+}
+
+@media (max-width: 620px) {
+  .machine { padding: 16px 12px 32px; }
+  .rail { gap: 12px; }
+  .maker { flex: 1 1 100%; }
+  .key { flex: 1 1 100%; }
+  .ident { flex: 1; min-width: 0; }
+  .ram-row { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .ram { width: 100%; }
+  .ram-label { font-size: 24px; }
+  .row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "main main" "clicks act";
+    row-gap: 9px;
+  }
+  .row-main { grid-area: main; }
+  .row-clicks { grid-area: clicks; text-align: left; display: flex; align-items: baseline; gap: 6px; }
+  .row-clicks span { display: inline; }
+  .row-act { grid-area: act; justify-self: end; }
+  .part { flex-wrap: wrap; }
+  /* A short URL is meant to be read in full, so wrap it rather than clip it. */
+  .part-url { flex-basis: 100%; white-space: normal; word-break: break-all; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .is-pressing textarea { transform: none; }
+}

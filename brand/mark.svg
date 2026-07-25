@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor" role="img" aria-label="sqz">
+  <!-- sqz mark: two jaws closing laterally on a link.
+       Lateral, not vertical: a URL is a horizontal string, and shortening it
+       reduces its width. The right jaw is stepped so you can tell which one
+       travels. The arrow survives the squeeze — the link still goes somewhere.
+       Uses currentColor throughout so it inherits the surrounding theme. -->
+  <rect x="2" y="3" width="5" height="26"/>
+  <rect x="25" y="3" width="5" height="26"/>
+  <rect x="22" y="10" width="3" height="12"/>
+  <path d="M10 16h8M15 12.5 18.5 16 15 19.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"/>
+</svg>

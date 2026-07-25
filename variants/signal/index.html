@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sqz — sign a link, pay in sats</title>
+<meta name="description" content="Compress a URL into a nostr event you sign yourself. Paid in sats over Lightning. Your key, your links.">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232F3DE0'/><path d='M8 12h16M11 20h10' stroke='white' stroke-width='2.5' stroke-linecap='round'/></svg>">
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-lead">
+    <a class="mark" href="/">sqz</a>
+    <p class="mark-note">A link you sign. A price in sats.</p>
+  </div>
+
+  <div class="bar-end">
+    <button id="signin" class="btn btn-line" type="button">Connect key</button>
+    <div id="identity" class="ident" hidden>
+      <span class="ident-dot" aria-hidden="true"></span>
+      <span class="ident-key" id="identity-key"></span>
+      <button id="signout" class="ident-out" type="button">Disconnect</button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- The stage. One string goes in long and comes out short, in place. -->
+  <section class="stage" aria-labelledby="stage-h">
+    <h1 class="vh" id="stage-h">Compress a link</h1>
+
+    <p class="stage-tag" id="stage-tag">Example</p>
+
+    <div class="strip" id="strip" data-state="idle">
+      <div class="strip-line strip-in" id="strip-in" aria-hidden="true"></div>
+      <div class="strip-line strip-out" id="strip-out" aria-hidden="true"></div>
+    </div>
+
+    <div class="gauge">
+      <div class="gauge-rail">
+        <span class="gauge-fill" id="gauge-fill"></span>
+      </div>
+      <div class="gauge-read">
+        <span class="gauge-num" id="count-in">0</span>
+        <span class="gauge-sep" aria-hidden="true">&rarr;</span>
+        <span class="gauge-num gauge-num-out" id="count-out">&mdash;</span>
+        <span class="gauge-ratio" id="count-ratio"></span>
+      </div>
+    </div>
+
+    <!-- Announced result, and the copy control. -->
+    <div class="landed" id="landed" hidden>
+      <a class="landed-url" id="result-url" href="#" rel="noopener"></a>
+      <button class="btn btn-solid" id="copy" type="button">Copy</button>
+    </div>
+
+    <p class="status" id="notice" role="status" hidden></p>
+  </section>
+
+  <!-- Controls. Deliberately quiet: the stage above is the subject. -->
+  <form id="form" class="panel" autocomplete="off">
+    <div class="field">
+      <label class="field-label" for="url">Destination</label>
+      <input id="url" class="input" type="url" name="url"
+             placeholder="https://" spellcheck="false" autocapitalize="off" required>
+    </div>
+
+    <div class="field field-slug">
+      <label class="field-label" for="slug">Name <span class="field-hint">optional</span></label>
+      <div class="slug-wrap">
+        <span class="slug-prefix" id="slug-prefix">sqz.link/</span>
+        <input id="slug" class="input input-slug" type="text" name="slug"
+               placeholder="auto" spellcheck="false" autocapitalize="off" maxlength="64">
+      </div>
+    </div>
+
+    <button id="squeeze" class="btn btn-solid btn-go" type="submit">
+      <span class="btn-go-label">Compress</span>
+      <span class="btn-go-price" id="price">10 sats</span>
+    </button>
+  </form>
+
+  <!-- Shown only when the paywall answers 402. -->
+  <section class="pay" id="invoice" hidden aria-labelledby="pay-h">
+    <h2 class="head" id="pay-h">Pay 10 sats to publish</h2>
+    <p class="pay-note">Your link is signed and waiting. Settle this invoice, then press Compress again.</p>
+    <code class="pay-code" id="invoice-code"></code>
+    <div class="pay-acts">
+      <a class="btn btn-solid" id="invoice-open" href="#">Open in wallet</a>
+      <button class="btn btn-line" id="invoice-copy" type="button">Copy invoice</button>
+    </div>
+  </section>
+
+  <!-- The user's links. -->
+  <section class="ledger" id="ledger" hidden aria-labelledby="ledger-h">
+    <h2 class="head" id="ledger-h">Your links</h2>
+    <div id="ledger-body"></div>
+  </section>
+
+  <!-- Standing explanation. Three facts, not three feature cards. -->
+  <section class="facts" id="block" aria-label="How sqz works">
+    <p><span class="facts-k">You sign it.</span> Each link is a kind 30078 event signed in your extension. sqz indexes it and cannot forge it.</p>
+    <p><span class="facts-k">You keep it.</span> The event lives on relays under your key. Revoking republishes the same name with an empty target.</p>
+    <p><span class="facts-k">You pay for it.</span> 10 sats over Lightning, per link, no account and no subscription.</p>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p>sqz.link/<span class="foot-mono">npub1&hellip;</span>/name &mdash; every link addressed by the key that made it.</p>
+</footer>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>

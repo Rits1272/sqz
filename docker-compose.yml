@@ -1,0 +1,160 @@
+services:
+  # L402 paywall. Owns all payment policy; sqzd knows nothing about sats.
+  nginx:
+    # Overridable so a locally-built, patched module image can be swapped in.
+    # The stock image's LNURL path hangs ~15s → 502 on ~1/3 of requests
+    # (fresh reqwest client + no timeout in l402_middleware); a locally-built
+    # image with a timeout added to l402_middleware fixes it.
+    image: ${SQZ_NGINX_IMAGE:-ghcr.io/dhananjaypurohit/ngx_l402:latest}
+    # The module ships amd64-only, so this runs under emulation on Apple
+    # Silicon. Without the pin, Docker refuses to start it.
+    platform: linux/amd64
+    ports:
+      # Host port is configurable so a deploy can avoid colliding with whatever
+      # else is on the box. The container always listens on 8000.
+      - "${SQZ_PORT:-8000}:8000"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    # The container has no working IPv6 route, but Docker's DNS still returns
+    # AAAA for primal.net, so the L402 module's HTTP client intermittently tries
+    # IPv6 first and stalls ~15s (→ 502) before falling back. Disabling the IPv6
+    # stack entirely is the reliable fix: getaddrinfo/connect never picks IPv6,
+    # so invoice minting stays on IPv4 and fast. The /etc/hosts pin is kept as a
+    # belt-and-braces IPv4 hint. Cloudflare anycast IPs — revisit if primal moves.
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+    extra_hosts:
+      - "primal.net:172.67.68.169"
+      - "primal.net:104.26.9.197"
+      - "primal.net:104.26.8.197"
+    environment:
+      # Payment backend. LNURL settles to a static Lightning address but gives
+      # the server no way to confirm a payment, so scan-to-pay wallets (Wallet
+      # of Satoshi, etc.) can't complete a link. NWC connects the server to a
+      # wallet that can both mint invoices and confirm they settled, which is
+      # what makes scan-and-auto-publish work. See docs/payments.md.
+      LN_CLIENT_TYPE: "${LN_CLIENT_TYPE:-LNURL}"
+      # LNURL mode: the address invoices are minted for. Validated at startup —
+      # if LN_CLIENT_TYPE=LNURL this must be a real, resolvable address or nginx
+      # crash-loops. Ignored in NWC mode.
+      LNURL_ADDRESS: "${LNURL_ADDRESS:-}"
+      # NWC mode: the wallet's Nostr Wallet Connect string (nostr+walletconnect://…).
+      # Both mints invoices and confirms settlement. Ignored in LNURL mode.
+      NWC_URI: "${NWC_URI:-}"
+      # Signs the macaroons the module issues. Generate with:
+      #   openssl rand -hex 32
+      ROOT_KEY: "${ROOT_KEY:?ROOT_KEY is required - generate with openssl rand -hex 32}"
+      # Preimage cache and the source of per-path dynamic pricing.
+      REDIS_URL: redis://redis:6379
+      # Diagnostics (default off). L402_PERF_LOG emits per-stage timings; RUST_LOG
+      # controls the module's log verbosity.
+      L402_PERF_LOG: "${L402_PERF_LOG:-false}"
+      RUST_LOG: "${RUST_LOG:-}"
+    depends_on:
+      redis:
+        condition: service_healthy
+      sqzd:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      # Internal network reaches sqzd and redis; the proxy network is shared
+      # with Traefik, which terminates TLS and forwards here over plain HTTP.
+      - default
+      - proxy
+    labels:
+      # exposedbydefault=false on this Traefik, so nothing routes without this.
+      - "traefik.enable=true"
+      # A container on two networks is ambiguous to Traefik unless told which
+      # one to dial — this must be the network Traefik itself is attached to.
+      - "traefik.docker.network=sqz-proxy"
+
+      # --- canonical host: the app itself, over HTTPS -----------------------
+      # SQZ_HOST is the bare canonical domain (e.g. sqzit.in). Every signature
+      # binds to this exact origin, so it must match SQZ_BASE_URL.
+      - "traefik.http.routers.sqz-https.rule=Host(`${SQZ_HOST:?SQZ_HOST is required}`)"
+      - "traefik.http.routers.sqz-https.entrypoints=https"
+      - "traefik.http.routers.sqz-https.tls=true"
+      - "traefik.http.routers.sqz-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.sqz-https.service=sqz"
+      # nginx (and the L402 module) listen on 8000 inside the container.
+      - "traefik.http.services.sqz.loadbalancer.server.port=8000"
+
+      # HTTP on the canonical host bounces to HTTPS. Signing needs a secure
+      # context, so plain HTTP is only ever a redirect.
+      - "traefik.http.routers.sqz-http.rule=Host(`${SQZ_HOST:?SQZ_HOST is required}`)"
+      - "traefik.http.routers.sqz-http.entrypoints=http"
+      - "traefik.http.routers.sqz-http.middlewares=sqz-https-redirect"
+      - "traefik.http.middlewares.sqz-https-redirect.redirectscheme.scheme=https"
+
+      # --- non-canonical hosts: redirect to the canonical origin ------------
+      # www and any legacy hostname must not serve the app under a different
+      # origin — that would silently break every NIP-98 signature. They
+      # redirect to the canonical host, preserving the path so old links keep
+      # working.
+      #
+      # SQZ_LEGACY_HOST is the pre-domain hostname a deployment used to answer
+      # on (an IP-based sslip.io name, a staging host, …). It stays out of the
+      # repo and lives in .env. The default is a reserved .invalid name that
+      # can never resolve, so an unset value matches nothing.
+      - "traefik.http.routers.sqz-alias.rule=Host(`www.${SQZ_HOST:?}`) || Host(`${SQZ_LEGACY_HOST:-none.invalid}`)"
+      - "traefik.http.routers.sqz-alias.entrypoints=http,https"
+      - "traefik.http.routers.sqz-alias.tls=true"
+      - "traefik.http.routers.sqz-alias.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.sqz-alias.middlewares=sqz-canonical"
+      - "traefik.http.routers.sqz-alias.service=sqz"
+      - "traefik.http.middlewares.sqz-canonical.redirectregex.regex=^https?://[^/]+/(.*)"
+      # $$ escapes compose interpolation so Traefik receives a literal ${1}.
+      - "traefik.http.middlewares.sqz-canonical.redirectregex.replacement=https://${SQZ_HOST:?}/$${1}"
+      - "traefik.http.middlewares.sqz-canonical.redirectregex.permanent=false"
+
+  # The application. Never exposed directly — all traffic arrives via nginx so
+  # the paywall cannot be bypassed by hitting the backend port.
+  sqzd:
+    build: .
+    expose:
+      - "8080"
+    environment:
+      SQZ_LISTEN: ":8080"
+      SQZ_REDIS_URL: redis://redis:6379/0
+      # NIP-98 signatures are bound to the absolute URL the client used, so
+      # this must match what users actually type, not the internal address.
+      SQZ_BASE_URL: ${SQZ_BASE_URL:-http://localhost:8000}
+      SQZ_DOMAIN: ${SQZ_DOMAIN:-localhost}
+      SQZ_LOG_LEVEL: ${SQZ_LOG_LEVEL:-info}
+      # Guards /admin/rebuild. Leaving it unset disables that endpoint
+      # entirely rather than leaving it open — see server.Config.AdminToken.
+      SQZ_ADMIN_TOKEN: ${SQZ_ADMIN_TOKEN:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+
+  redis:
+    image: redis:7-alpine
+    # appendonly matters: this instance holds click analytics and the L402
+    # preimage cache, which exist nowhere else. The link index is derived from
+    # relays and could be rebuilt, but analytics cannot.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - default
+
+networks:
+  default:
+  # Shared with the host's Traefik. Created and joined to Traefik out of band so
+  # this stack never owns or restarts the proxy other apps on the box rely on.
+  proxy:
+    external: true
+    name: sqz-proxy
+
+volumes:
+  redis-data:

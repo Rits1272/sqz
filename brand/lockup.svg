@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 132 32" fill="currentColor" role="img" aria-label="sqz">
+  <!-- Horizontal lockup: mark + wordmark. The wordmark is drawn as paths, not
+       set in a font, so it renders identically everywhere with no dependency. -->
+  <g>
+    <rect x="2" y="3" width="5" height="26"/>
+    <rect x="25" y="3" width="5" height="26"/>
+    <rect x="22" y="10" width="3" height="12"/>
+    <path d="M10 16h8M15 12.5 18.5 16 15 19.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="square"/>
+  </g>
+  <g transform="translate(44 0)">
+    <!-- s -->
+    <path d="M2 10h18v5H8v2h12v10H2v-5h13v-2H2z"/>
+    <!-- q: descender runs a full 4 units below the baseline so it cannot be
+         misread as an o with a tick -->
+    <path d="M24 10h18v21h-5v-4H24zm5 5v7h8v-7z"/>
+    <!-- z: narrower than s and q — the name compresses as you read it -->
+    <path d="M46 10h15v4l-8 8h8v5H46v-4l8-8h-8z"/>
+  </g>
+</svg>

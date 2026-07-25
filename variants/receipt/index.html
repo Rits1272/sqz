@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sqz — link compression, printed and paid</title>
+<meta name="description" content="Print a short link. Signed with your nostr key, paid in sats, filed in your own register.">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23fafaf7'/><g fill='%2317181c'><rect x='7' y='7' width='18' height='2'/><rect x='7' y='12' width='18' height='2'/><rect x='7' y='17' width='11' height='2'/><rect x='7' y='23' width='18' height='2'/></g></svg>">
+</head>
+<body>
+
+<div class="counter">
+<main class="slips">
+
+  <!-- ORDER SLIP -->
+  <section class="slip slip-order" aria-labelledby="shop">
+    <div class="bezel" aria-hidden="true"></div>
+
+    <div class="pad">
+
+      <header class="shop">
+        <h1 id="shop" class="shop-name">sqz</h1>
+        <p class="shop-sub">link compression &amp; co.</p>
+        <p class="shop-addr">sqz.link · open 24h · no accounts kept</p>
+      </header>
+
+      <div class="perf" role="separator"></div>
+
+      <dl class="meta">
+        <div class="line">
+          <dt>Terminal</dt><span class="dots" aria-hidden="true"></span><dd>01</dd>
+        </div>
+        <div class="line">
+          <dt>Printed</dt><span class="dots" aria-hidden="true"></span><dd id="stamp-time">—</dd>
+        </div>
+        <div class="line">
+          <dt>Customer</dt><span class="dots" aria-hidden="true"></span><dd id="cust">not signed in</dd>
+        </div>
+      </dl>
+
+      <div class="signin-row">
+        <button id="signin" class="btn btn-ink" type="button">Sign in with nostr</button>
+        <button id="signout" class="btn btn-quiet" type="button" hidden>Sign out</button>
+      </div>
+
+      <div class="perf" role="separator"></div>
+
+      <form id="form" class="order" autocomplete="off">
+        <h2 class="rule-head"><span>Order</span></h2>
+
+        <div class="field">
+          <label for="url">Destination</label>
+          <input id="url" name="url" type="url" inputmode="url" spellcheck="false"
+                 placeholder="https://" required>
+          <p class="field-note"><span id="url-count">0</span> characters in</p>
+        </div>
+
+        <div class="field">
+          <label for="slug">Name <span class="opt">optional</span></label>
+          <div class="slug-wrap">
+            <span class="slug-prefix" id="slug-prefix" aria-hidden="true">sqz/</span>
+            <input id="slug" name="slug" type="text" spellcheck="false" maxlength="64"
+                   placeholder="assigned at print">
+          </div>
+        </div>
+
+        <dl class="tally">
+          <div class="line">
+            <dt>1 × short link</dt><span class="dots" aria-hidden="true"></span><dd>10 sat</dd>
+          </div>
+          <div class="line line-total">
+            <dt>Due</dt><span class="dots" aria-hidden="true"></span><dd>10 sat</dd>
+          </div>
+        </dl>
+
+        <button id="print" class="btn btn-print" type="submit">
+          <span class="btn-print-label">Print link</span>
+          <span class="btn-print-sub">signs · pays · publishes</span>
+        </button>
+      </form>
+
+      <p class="notice" id="notice" role="status" hidden></p>
+
+      <!-- PRINTED RESULT -->
+      <output id="result" class="result" hidden>
+        <div class="perf" aria-hidden="true"></div>
+        <p class="stamp stamp-printed"><span>Printed</span></p>
+        <div class="result-row">
+          <a class="result-url" id="result-url" href="#" rel="noopener"></a>
+          <button class="btn btn-quiet" id="copy" type="button">Copy</button>
+        </div>
+        <p class="result-note" id="result-note"></p>
+      </output>
+
+      <!-- PAYMENT DUE -->
+      <section class="due" id="invoice" hidden aria-labelledby="due-head">
+        <div class="perf" aria-hidden="true"></div>
+        <h2 class="rule-head" id="due-head"><span>Payment due</span></h2>
+        <p class="due-note">Pay this Lightning invoice, then press Print link again. Nothing is published until it clears.</p>
+        <code class="invoice-code" id="invoice-code"></code>
+        <div class="due-actions">
+          <a class="btn btn-ink" id="invoice-open" href="#">Open wallet</a>
+          <button class="btn btn-quiet" id="invoice-copy" type="button">Copy invoice</button>
+        </div>
+      </section>
+
+    </div>
+    <div class="tear" aria-hidden="true"></div>
+  </section>
+
+  <!-- REGISTER TAPE -->
+  <section class="slip slip-register" aria-labelledby="reg-head">
+    <div class="bezel" aria-hidden="true"></div>
+    <div class="pad">
+
+      <h2 class="rule-head rule-head-lg" id="reg-head"><span>Register</span></h2>
+      <p class="reg-sub">Every link you have printed. Voiding republishes it with an empty destination, and it stops resolving.</p>
+
+      <div class="perf" aria-hidden="true"></div>
+
+      <div id="ledger" class="ledger" aria-live="polite">
+        <p class="empty" id="empty-state">
+          Nothing on the tape yet.<br>
+          Sign in, paste a destination, print your first link.
+        </p>
+      </div>
+
+      <div class="perf" aria-hidden="true"></div>
+
+      <dl class="tally tally-final" id="totals" hidden>
+        <div class="line"><dt>Line items</dt><span class="dots" aria-hidden="true"></span><dd id="t-items">0</dd></div>
+        <div class="line"><dt>Clicks served</dt><span class="dots" aria-hidden="true"></span><dd id="t-clicks">0</dd></div>
+        <div class="line"><dt>Voided</dt><span class="dots" aria-hidden="true"></span><dd id="t-void">0</dd></div>
+        <div class="line line-total"><dt>Paid to date</dt><span class="dots" aria-hidden="true"></span><dd id="t-paid">0 sat</dd></div>
+      </dl>
+
+      <footer class="foot">
+        <div class="barcode" id="barcode" aria-hidden="true"></div>
+        <p class="foot-code" id="foot-code">npub —</p>
+        <p class="foot-line">Kind 30078 · signed by your key · stored on relays</p>
+        <p class="foot-line">sqz indexes your links. It cannot forge them.</p>
+        <p class="foot-thanks">Keys, not accounts</p>
+      </footer>
+
+    </div>
+    <div class="tear" aria-hidden="true"></div>
+  </section>
+
+</main>
+</div>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
