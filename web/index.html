@@ -202,6 +202,11 @@
           <span class="btn-wait" aria-hidden="true"><i></i><i></i><i></i></span>
         </button>
       </div>
+
+      <label class="optin">
+        <input type="checkbox" id="public-optin">
+        <span>List this on the public leaderboard</span>
+      </label>
     </form>
 
     <!-- The payoff. The ratio gets the expressive moment because it is the
@@ -221,6 +226,13 @@
     </output>
 
     <p class="notice" id="notice" hidden></p>
+  </section>
+
+  <!-- Public leaderboard: opted-in links, most-clicked first. Free for anyone
+       arriving on the page; hides itself until there's something to show. -->
+  <section class="board" id="board" data-enter="4" aria-labelledby="board-title" hidden>
+    <h2 id="board-title" class="board-title">Top links on sqz</h2>
+    <ol class="board-list" id="board-list"></ol>
   </section>
 
   <!-- Payment. Shown whenever the paywall asks — the invoice leads, always

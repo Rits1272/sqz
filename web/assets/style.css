@@ -374,6 +374,20 @@ input:focus {
 .slug-hint.is-free { color: var(--success); }
 .slug-hint.is-taken { color: var(--danger); }
 
+.optin { display: inline-flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.optin input { accent-color: var(--violet); width: 15px; height: 15px; }
+
+/* Public leaderboard */
+.board { margin-top: 40px; }
+.board-title { font-size: 15px; font-weight: 620; letter-spacing: -.01em; color: var(--ink-2); margin: 0 0 10px; }
+.board-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.board-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: var(--r-sm); }
+.board-row:hover { background: var(--surface-2); }
+.board-rank { width: 20px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink-3); }
+.board-slug { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 13px; color: var(--ink); text-decoration: none; }
+.board-slug:hover { color: var(--violet); }
+.board-clicks { font-size: 12px; font-weight: 560; color: var(--ink-2); white-space: nowrap; }
+
 /* -------------------------------------------------------------- buttons */
 
 .btn {

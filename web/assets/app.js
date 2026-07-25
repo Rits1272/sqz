@@ -48,6 +48,8 @@ const ui = {
   analyticsBtn: el("analytics-btn"), analyticsModal: el("analytics-modal"),
   analyticsClose: el("analytics-close"),
   anClicks: el("an-clicks"), anLinks: el("an-links"), anList: el("an-list"), anEmpty: el("an-empty"),
+  publicOptin: el("public-optin"),
+  board: el("board"), boardList: el("board-list"),
 };
 
 const state = {
@@ -438,9 +440,10 @@ async function authHeader(method, path, body) {
   return "Nostr " + btoa(JSON.stringify(signed));
 }
 
-async function signLinkEvent(slug, destination, title) {
+async function signLinkEvent(slug, destination, title, isPublic) {
   const tags = [["d", SLUG_PREFIX + slug], ["r", destination]];
   if (title) tags.push(["title", title]);
+  if (isPublic) tags.push(["public", "1"]);
 
   return state.signer.signEvent({
     kind: KIND_LINK,
@@ -671,6 +674,49 @@ async function loadLinks() {
   } catch {
     // A failed listing must never block creating a link.
   }
+}
+
+/* ------------------------------------------------------------ leaderboard */
+
+/* Public top-links board. Free and unauthenticated — the engagement surface on
+   the landing page. Only opted-in links appear; the section hides itself when
+   the board is empty. Rendered via textContent, never innerHTML. */
+async function loadLeaderboard() {
+  let data;
+  try {
+    const res = await fetch("/api/leaderboard");
+    if (!res.ok) return;
+    data = await res.json();
+  } catch {
+    return;
+  }
+  const rows = Array.isArray(data.links) ? data.links : [];
+  if (!rows.length) { ui.board.hidden = true; return; }
+
+  ui.boardList.replaceChildren();
+  rows.forEach((l, i) => {
+    const row = document.createElement("li");
+    row.className = "board-row";
+
+    const rank = document.createElement("span");
+    rank.className = "board-rank";
+    rank.textContent = String(i + 1);
+
+    const name = document.createElement("a");
+    name.className = "board-slug";
+    name.href = l.short_url;
+    name.textContent = "/" + l.slug;
+    name.target = "_blank";
+    name.rel = "noopener noreferrer";
+
+    const clicks = document.createElement("span");
+    clicks.className = "board-clicks";
+    clicks.textContent = `${(l.clicks ?? 0).toLocaleString()} clicks`;
+
+    row.append(rank, name, clicks);
+    ui.boardList.append(row);
+  });
+  ui.board.hidden = false;
 }
 
 /* -------------------------------------------------------------- analytics */
@@ -1008,14 +1054,16 @@ ui.form.addEventListener("submit", async (e) => {
 
   try {
     const slug = custom || (await fetchServerSlug());
-    const event = await signLinkEvent(slug, destination, "");
+    const event = await signLinkEvent(slug, destination, "", ui.publicOptin.checked);
     setWaiting(true, "Publishing");
 
     const data = await createLink(event, path);
     showResult(destination, data.short_url);
     ui.slug.value = "";
+    ui.publicOptin.checked = false;
     refreshSlugState();
     await loadLinks();
+    loadLeaderboard();
   } catch (err) {
     if (err.message !== PAYMENT_PENDING) {
       say(err.message || "Could not shorten that link.", "error");
@@ -1100,6 +1148,7 @@ ui.preimageSubmit.addEventListener("click", async () => {
   neutralNamespace();
   measureInput();
   trackPointer();
+  loadLeaderboard();
 
   // Reconnect to the signer used last time. Extension: only if it's present
   // (avoids errors). Browser key: only if one is actually stored.

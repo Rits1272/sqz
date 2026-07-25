@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -423,6 +424,61 @@ func (s *Store) SlugTaken(ctx context.Context, slug string) (bool, error) {
 		return false, fmt.Errorf("store: slug taken: %w", err)
 	}
 	return n == 1, nil
+}
+
+// SetPublic opts a slug in or out of the public leaderboard. Opt-in, so a link
+// is only ever globally surfaced because its owner chose to.
+func (s *Store) SetPublic(ctx context.Context, slug string, public bool) error {
+	if public {
+		return s.rdb.SAdd(ctx, derivedPrefix+"public", slug).Err()
+	}
+	return s.rdb.SRem(ctx, derivedPrefix+"public", slug).Err()
+}
+
+// BoardEntry is one row of the public leaderboard.
+type BoardEntry struct {
+	Slug   string `json:"slug"`
+	Clicks int64  `json:"clicks"`
+}
+
+// PublicLeaderboard returns the most-clicked opted-in links. It caches the
+// result briefly because it's a public, unauthenticated endpoint hit on every
+// homepage load; the count itself is the raw click counter (gameable — a v1
+// tradeoff), so a few seconds of staleness costs nothing.
+func (s *Store) PublicLeaderboard(ctx context.Context, limit int) ([]BoardEntry, error) {
+	cacheKey := localPrefix + "board:top"
+	if blob, err := s.rdb.Get(ctx, cacheKey).Bytes(); err == nil {
+		var cached []BoardEntry
+		if json.Unmarshal(blob, &cached) == nil {
+			return cached, nil
+		}
+	}
+
+	slugs, err := s.rdb.SMembers(ctx, derivedPrefix+"public").Result()
+	if err != nil {
+		return nil, fmt.Errorf("store: public slugs: %w", err)
+	}
+	entries := make([]BoardEntry, 0, len(slugs))
+	for _, slug := range slugs {
+		owner, err := s.rdb.Get(ctx, slugOwnerKey(slug)).Result()
+		if errors.Is(err, redis.Nil) {
+			continue // owner gone; skip
+		}
+		if err != nil {
+			return nil, fmt.Errorf("store: board owner: %w", err)
+		}
+		clicks, _ := s.rdb.Get(ctx, localPrefix+"clicks:"+owner+":"+slug).Int64()
+		entries = append(entries, BoardEntry{Slug: slug, Clicks: clicks})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Clicks > entries[j].Clicks })
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	if blob, err := json.Marshal(entries); err == nil {
+		s.rdb.Set(ctx, cacheKey, blob, 30*time.Second)
+	}
+	return entries, nil
 }
 
 // RecordClick increments a link's click counter.
