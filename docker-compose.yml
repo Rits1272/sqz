@@ -1,11 +1,12 @@
 services:
   # L402 paywall. Owns all payment policy; sqzd knows nothing about sats.
   nginx:
-    # Overridable so a locally-built, patched module image can be swapped in.
-    # The stock image's LNURL path hangs ~15s → 502 on ~1/3 of requests
-    # (fresh reqwest client + no timeout in l402_middleware); a locally-built
-    # image with a timeout added to l402_middleware fixes it.
-    image: ${SQZ_NGINX_IMAGE:-ghcr.io/dhananjaypurohit/ngx_l402:latest}
+    # Pinned to a release so a moving tag can't change the paywall under us.
+    # The image moved orgs at 1.2.8; the old ghcr.io/dhananjaypurohit/ngx_l402
+    # path is frozen at 1.2.7 and still pulls cleanly. 1.3.0 ships the LNURL
+    # client timeout that used to need a locally-patched build, so no patch.
+    # Overridable to test another build.
+    image: ${SQZ_NGINX_IMAGE:-ghcr.io/ngx-l402/ngx-l402:1.3.0}
     # The module ships amd64-only, so this runs under emulation on Apple
     # Silicon. Without the pin, Docker refuses to start it.
     platform: linux/amd64
