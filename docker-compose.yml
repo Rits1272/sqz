@@ -50,6 +50,12 @@ services:
       # Diagnostics (default off). L402_PERF_LOG emits per-stage timings; RUST_LOG
       # controls the module's log verbosity.
       L402_PERF_LOG: "${L402_PERF_LOG:-false}"
+      # The "service" block of /.well-known/l402-services. Empty values are
+      # left out of the manifest.
+      L402_SERVICE_NAME: "${L402_SERVICE_NAME:-sqz}"
+      L402_SERVICE_DESCRIPTION: "${L402_SERVICE_DESCRIPTION:-Nostr-signed short links, paid over Lightning.}"
+      L402_SERVICE_OPERATOR: "${L402_SERVICE_OPERATOR:-}"
+      L402_SERVICE_CONTACT: "${L402_SERVICE_CONTACT:-}"
       RUST_LOG: "${RUST_LOG:-}"
     depends_on:
       redis:
