@@ -43,7 +43,7 @@ const ui = {
   copy: el("copy"), notice: el("notice"),
   invoice: el("invoice"), invoiceCode: el("invoice-code"),
   qr: el("qr"), qrImg: el("qr-img"), qrStatus: el("qr-status"),
-  payWebln: el("pay-webln"),
+  payWebln: el("pay-webln"), payCheck: el("pay-check"),
   invoiceManual: el("invoice-manual"), preimage: el("preimage"), preimageSubmit: el("preimage-submit"),
   invoiceOpen: el("invoice-open"), invoiceCopy: el("invoice-copy"),
   links: el("links"), linksBody: el("links-body"), linksCount: el("links-count"),
@@ -76,6 +76,25 @@ let pendingPayment = null;
    the user is paying to remove, and the receipt afterwards calls a dead link
    Live. Shape: { kind: "create" | "revoke", slug }. */
 let pendingIntent = { kind: "create" };
+
+/* True when the paywall can confirm a payment itself (l402_auto_detect_payment,
+   read from the L402 manifest at boot). Then the page only has to ask again
+   with the macaroon, and any wallet works — no preimage, no extension. False
+   on a backend that cannot look payments up (a static Lightning address), where
+   the preimage is the only proof there is. */
+let autoDetect = false;
+
+/* The loop that asks. One request in flight at a time: a paid credential is
+   single-use, so two racing retries would have the second rejected as a replay. */
+const WATCH_EVERY_MS = 3000;
+const WATCH_FOR_MS = 20 * 60 * 1000;   // past this the invoice has expired anyway
+/* The app accepts a NIP-98 signature for 60s. The retry that finds the invoice
+   paid spends the payment, so it must never arrive with a stale signature —
+   re-sign well inside the window. */
+const CRED_FRESH_MS = 30 * 1000;
+let watchTimer = null;
+let watchStarted = 0;
+let completing = false;
 
 /* ------------------------------------------------------------------ util */
 
@@ -163,6 +182,10 @@ function restorePayment() {
   pendingPayment = saved.payment;
   pendingIntent = saved.intent || { kind: "create" };
   showInvoice(`invoice="${saved.payment.invoice}" macaroon="${saved.payment.macaroon}"`);
+  if (autoDetect) {
+    say("You have an unfinished invoice from earlier in this tab. If you already paid it, it will be picked up in a moment.", "note");
+    return;
+  }
   say("You have an unfinished invoice from earlier in this tab. If you already paid it, paste the preimage below to claim it.", "note");
   if (ui.invoiceManual) ui.invoiceManual.open = true;
 }
@@ -686,7 +709,7 @@ async function createLink(event, path = "/api/links") {
     // Always show the invoice — the QR leads. WebLN is offered as one option in
     // the panel, never forced ahead of showing the invoice. Everything needed
     // to complete (by extension, scan, or pasted preimage) is stashed here.
-    pendingPayment = { body, nostrCred, path, ...challenge, event };
+    pendingPayment = { body, nostrCred, credAt: Date.now(), path, ...challenge, event };
     stashPayment();
     showInvoice(res.headers.get("WWW-Authenticate"));
     throw new Error(PAYMENT_PENDING);
@@ -728,49 +751,35 @@ async function payWithWebln(invoice) {
    field or a WebLN payment. */
 async function completePendingPayment(preimage) {
   if (!pendingPayment) return;
-  const { body, macaroon, event, path } = pendingPayment;
+  // Wait out a watch request already in flight rather than race it: whichever
+  // lands second would be refused as a replay of the same payment.
+  while (completing) await new Promise((r) => setTimeout(r, 100));
+  if (!pendingPayment) return;   // the watch claimed it meanwhile
+  const { body, macaroon, path } = pendingPayment;
 
-  // Re-sign NIP-98 fresh. The original was signed when Shorten was clicked, and
-  // paying can take minutes — long enough for that signature to age out of the
-  // ±60s window and be rejected by the app. A new one authorizes this retry.
-  const nostrCred = await authHeader("POST", path, body);
+  completing = true;
+  let res;
+  try {
+    // Re-sign NIP-98 fresh. The original was signed when Shorten was clicked, and
+    // paying can take minutes — long enough for that signature to age out of the
+    // ±60s window and be rejected by the app. A new one authorizes this retry.
+    const nostrCred = await authHeader("POST", path, body);
 
-  const res = await fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Nostr-Authorization": nostrCred,
-      Authorization: `L402 ${macaroon}:${preimage.trim()}`,
-    },
-    body,
-  });
+    res = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nostr-Authorization": nostrCred,
+        Authorization: `L402 ${macaroon}:${preimage.trim()}`,
+      },
+      body,
+    });
+  } finally {
+    completing = false;
+  }
 
   if (res.ok) {
-    pendingPayment = null;
-    clearStash();
-
-    window.sqzTrack?.("payment_completed", { amount_sats: path === "/api/links/custom" ? 500 : 100 });
-
-    const data = await res.json().catch(() => ({}));
-    const destination = event.tags.find((t) => t[0] === "r")?.[1] || "";
-
-    // Stamp the code paid and let the panel go before the result arrives.
-    // Sequenced, not simultaneous: settling the invoice and revealing the link
-    // are two different pieces of news.
-    await settleInvoice();
-
-    // A revocation has no result to celebrate. Routing it through showResult
-    // rendered the link the user just destroyed with a live badge, a "Ready"
-    // ratio and a Copy button.
-    if (pendingIntent.kind === "revoke") {
-      say(`Revoked /${pendingIntent.slug}. It no longer resolves.`, "good");
-      pendingIntent = { kind: "create" };
-      await loadLinks();
-      return;
-    }
-
-    showResult(destination, data.short_url);
-    await loadLinks();
+    await finishPaid(res);
     return;
   }
 
@@ -788,6 +797,138 @@ async function completePendingPayment(preimage) {
   }
   const data = await res.json().catch(() => ({}));
   throw new Error(data.error || `Could not publish the link (status ${res.status}).`);
+}
+
+/* The paid request went through. Shared by every way of paying: a preimage, a
+   WebLN payment, or the watch finding the invoice settled. */
+async function finishPaid(res) {
+  const { event, path } = pendingPayment;
+  stopWatch();
+  pendingPayment = null;
+  clearStash();
+
+  window.sqzTrack?.("payment_completed", { amount_sats: path === "/api/links/custom" ? 500 : 100 });
+
+  const data = await res.json().catch(() => ({}));
+  const destination = event.tags.find((t) => t[0] === "r")?.[1] || "";
+
+  // Stamp the code paid and let the panel go before the result arrives.
+  // Sequenced, not simultaneous: settling the invoice and revealing the link
+  // are two different pieces of news.
+  await settleInvoice();
+
+  // A revocation has no result to celebrate. Routing it through showResult
+  // rendered the link the user just destroyed with a live badge, a "Ready"
+  // ratio and a Copy button.
+  if (pendingIntent.kind === "revoke") {
+    say(`Revoked /${pendingIntent.slug}. It no longer resolves.`, "good");
+    pendingIntent = { kind: "create" };
+    await loadLinks();
+    return;
+  }
+
+  showResult(destination, data.short_url);
+  await loadLinks();
+  loadLeaderboard();
+}
+
+/* ------------------------------------------------------------------ watch */
+
+/* Ask the paywall whether the invoice on screen has been paid, by retrying the
+ * stashed request with the macaroon alone. Unpaid, nginx answers 402 without
+ * the app ever seeing the request, so asking costs nothing and can repeat.
+ * Paid, the request goes through and the link is made — that retry spends the
+ * payment, which is why it always carries a signature the app will accept.
+ *
+ * `asked` is true when a person asked (the button, or coming back to the tab):
+ * only then may an extension be prompted for a fresh signature, and only then
+ * is "nothing yet" worth saying out loud. Returns true once the link is made. */
+async function checkPayment(asked = false) {
+  if (!autoDetect || !pendingPayment || completing || !state.signer) return false;
+  const pending = pendingPayment;
+
+  completing = true;
+  try {
+    if (Date.now() - (pending.credAt || 0) > CRED_FRESH_MS) {
+      // A browser key signs silently. An extension may raise a prompt, and one
+      // every half minute is no way to wait for a payment — so the loop stops
+      // and leaves the button.
+      if (state.signerKind !== "local" && !asked) {
+        stopWatch();
+        if (ui.qrStatus) ui.qrStatus.textContent = "Paid? Press “I’ve paid”.";
+        return false;
+      }
+      pending.nostrCred = await authHeader("POST", pending.path, pending.body);
+      pending.credAt = Date.now();
+      stashPayment();
+    }
+
+    const res = await fetch(pending.path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Nostr-Authorization": pending.nostrCred,
+        Authorization: `L402 ${pending.macaroon}`,
+      },
+      body: pending.body,
+    });
+
+    if (res.status === 402) {
+      if (asked) say("No payment has arrived for this invoice yet. It can take a few seconds after your wallet confirms.", "note");
+      return false;
+    }
+
+    if (res.ok) {
+      // finishPaid announces a revocation itself, and resets the intent.
+      const revoking = pendingIntent.kind === "revoke";
+      await finishPaid(res);
+      if (!revoking) say("Paid. Your link is live.", "good");
+      return true;
+    }
+
+    // 5xx is the paywall failing to reach the wallet — nothing was spent, so
+    // keep asking. Anything else is final for this invoice.
+    if (res.status >= 500) {
+      if (asked) say("Could not check the payment just now. Trying again.", "note");
+      return false;
+    }
+
+    stopWatch();
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("json")) {
+      say(`The paywall refused this invoice (status ${res.status}). Press Shorten for a new one.`, "error");
+      return false;
+    }
+    const data = await res.json().catch(() => ({}));
+    say(data.error || `Could not publish the link (status ${res.status}).`, "error");
+    return false;
+  } catch (err) {
+    // Offline, or the signer declined. Nothing was spent; the loop tries again.
+    if (asked) say(err.message || "Could not check the payment.", "error");
+    return false;
+  } finally {
+    completing = false;
+  }
+}
+
+function startWatch() {
+  stopWatch();
+  if (!autoDetect || !pendingPayment) return;
+  watchStarted = Date.now();
+  watchTimer = setInterval(() => {
+    if (document.hidden) return;   // picked up again on visibilitychange
+    if (Date.now() - watchStarted > WATCH_FOR_MS) {
+      stopWatch();
+      if (ui.qrStatus) ui.qrStatus.textContent = "Paid? Press “I’ve paid”.";
+      return;
+    }
+    checkPayment(false);
+  }, WATCH_EVERY_MS);
+}
+
+function stopWatch() {
+  if (watchTimer) clearInterval(watchTimer);
+  watchTimer = null;
 }
 
 /* Close out the invoice panel: stamp the QR paid, hold long enough to be read,
@@ -988,6 +1129,7 @@ function showInvoice(wwwAuthenticate) {
   ui.payWebln.hidden = !window.webln;
   ui.payWebln.disabled = false;
   ui.preimage.value = "";
+  if (ui.payCheck) ui.payCheck.hidden = !autoDetect;
   if (ui.qrStatus) ui.qrStatus.textContent = "Waiting for payment…";
   // A previous invoice may have been settled in this session; this one has not.
   ui.qr.classList.remove("is-paid");
@@ -996,6 +1138,7 @@ function showInvoice(wwwAuthenticate) {
   if (title?.firstChild?.nodeType === Node.TEXT_NODE) title.firstChild.textContent = "Scan to pay ";
   ui.invoice.hidden = false;
   ui.invoice.scrollIntoView({ behavior: reduced() ? "auto" : "smooth", block: "nearest" });
+  startWatch();
 }
 
 /* ----------------------------------------------------------------- render */
@@ -1538,6 +1681,30 @@ ui.payWebln.addEventListener("click", async () => {
   }
 });
 
+// "I've paid": ask now instead of waiting for the next tick. Also the way back
+// in once the loop has stopped itself.
+ui.payCheck?.addEventListener("click", async () => {
+  if (!pendingPayment) return;
+  ui.payCheck.disabled = true;
+  if (ui.qrStatus) ui.qrStatus.textContent = "Checking…";
+  try {
+    const done = await checkPayment(true);
+    if (!done && pendingPayment) {
+      if (ui.qrStatus) ui.qrStatus.textContent = "Waiting for payment…";
+      if (!watchTimer) startWatch();
+    }
+  } finally {
+    ui.payCheck.disabled = false;
+  }
+});
+
+// On a phone, paying means leaving for the wallet app, and a hidden tab's
+// timers barely run. Coming back is the moment the answer is wanted.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || !pendingPayment || !autoDetect) return;
+  checkPayment(true).then((done) => { if (!done && pendingPayment && !watchTimer) startWatch(); });
+});
+
 ui.preimageSubmit.addEventListener("click", async () => {
   const preimage = ui.preimage.value.trim();
   if (!/^[0-9a-f]{64}$/i.test(preimage)) {
@@ -1558,6 +1725,24 @@ ui.preimageSubmit.addEventListener("click", async () => {
 });
 
 /* ------------------------------------------------------------------- boot */
+
+/* Whether the paywall confirms payments itself, from the manifest the L402
+   module generates out of the live nginx config. Any doubt reads as "no": the
+   preimage path works on every backend. */
+async function paywallAutoDetects() {
+  try {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 4000);
+    const res = await fetch("/.well-known/l402-services", { signal: ctl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return false;
+    const routes = (await res.json()).routes || [];
+    const paid = routes.filter((r) => r.path === "/api/links" || r.path === "/api/links/custom");
+    return paid.length > 0 && paid.every((r) => r.auto_detect_payment === true);
+  } catch {
+    return false;
+  }
+}
 
 (async function boot() {
   let cfg = null;
@@ -1591,6 +1776,7 @@ ui.preimageSubmit.addEventListener("click", async () => {
   neutralNamespace();
   measureInput();
   trackPointer();
+  autoDetect = await paywallAutoDetects();
   restorePayment();
   loadLeaderboard();
 

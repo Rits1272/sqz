@@ -16,6 +16,9 @@ services:
       - "${SQZ_PORT:-8000}:8000"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # l402_auto_detect_payment, chosen by payment backend so the two cannot
+      # drift apart: on for NWC (the wallet can be asked), off for LNURL.
+      - ./nginx/autodetect/${LN_CLIENT_TYPE:-LNURL}.conf:/etc/nginx/l402-autodetect.conf:ro
     # The container has no working IPv6 route, but Docker's DNS still returns
     # AAAA for primal.net, so the L402 module's HTTP client intermittently tries
     # IPv6 first and stalls ~15s (→ 502) before falling back. Disabling the IPv6
@@ -50,6 +53,12 @@ services:
       # Diagnostics (default off). L402_PERF_LOG emits per-stage timings; RUST_LOG
       # controls the module's log verbosity.
       L402_PERF_LOG: "${L402_PERF_LOG:-false}"
+      # The "service" block of /.well-known/l402-services. Empty values are
+      # left out of the manifest.
+      L402_SERVICE_NAME: "${L402_SERVICE_NAME:-sqz}"
+      L402_SERVICE_DESCRIPTION: "${L402_SERVICE_DESCRIPTION:-Nostr-signed short links, paid over Lightning.}"
+      L402_SERVICE_OPERATOR: "${L402_SERVICE_OPERATOR:-}"
+      L402_SERVICE_CONTACT: "${L402_SERVICE_CONTACT:-}"
       RUST_LOG: "${RUST_LOG:-}"
     depends_on:
       redis:
