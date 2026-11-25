@@ -102,3 +102,34 @@ inode, so a plain `docker compose up -d` keeps serving the **old** config. After
 changing it, force a rebind:
 
     docker compose -p sqz up -d --force-recreate nginx
+
+## Scan-to-pay: server-side settlement (NWC)
+
+The preimage flow above only completes for a payer whose wallet hands the
+preimage back to the page. A phone wallet scanning the QR does not, so the page
+sat on "Waiting for payment…" for a payment that had already arrived.
+
+With `LN_CLIENT_TYPE=NWC` the module can ask the wallet whether an invoice
+settled, and `l402_auto_detect_payment on` lets a client retry with the macaroon
+alone (`Authorization: L402 <macaroon>`):
+
+- **Config.** `docker-compose.yml` mounts `nginx/autodetect/<LN_CLIENT_TYPE>.conf`
+  into both paid locations, so the directive follows the backend: on for NWC, off
+  for LNURL. They cannot be set independently, because auto-detect on a static
+  address hangs and 502s.
+- **Frontend.** At boot the page reads `/.well-known/l402-services`. If both paid
+  routes report `auto_detect_payment: true`, it retries the stashed request every
+  3 seconds while the invoice is on screen, and at once when the tab becomes
+  visible again or "I've paid" is pressed. Otherwise nothing changes: preimage
+  or WebLN only.
+- **Why the retry is safe to repeat.** An unpaid retry is answered `402` by nginx
+  and never reaches sqzd, so no NIP-98 event is consumed. The retry that finds
+  the invoice settled goes through and spends the payment, so it must carry a
+  signature sqzd accepts: the page re-signs once the credential is 30 seconds
+  old, half the 60-second window.
+- **Extensions.** Re-signing with a browser key is silent. An extension may
+  prompt, so with an extension signer the loop stops when the first signature
+  ages out and leaves the "I've paid" button, which signs once.
+
+The NWC connection needs `make_invoice` and `lookup_invoice` only. It never pays,
+so grant it no spending permission.
